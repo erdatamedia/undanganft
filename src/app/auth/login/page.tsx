@@ -41,7 +41,7 @@ function LoginForm() {
           <Lock className="h-8 w-8 text-emerald-400" />
           <h1 className="text-2xl font-semibold">Portal Panitia FT</h1>
           <p className="text-sm text-slate-400">
-            Masuk dengan akun panitia untuk mengakses dashboard RSVP yudisium.
+            Masuk dengan akun panitia untuk mengakses dashboard pelepasan.
           </p>
         </div>
         <form onSubmit={handleSubmit} className="space-y-4">

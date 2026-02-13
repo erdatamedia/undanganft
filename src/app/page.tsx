@@ -24,11 +24,31 @@ import {
   Users,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
-import type { AttendeeRecord, RSVPStatus } from "@/lib/storage";
-import { buildInviteLink, eventConfig } from "@/lib/event";
+import type { AttendeeRecord, InviteStatus } from "@/lib/storage";
+
+type EventRecord = {
+  id: string;
+  name: string;
+  date: string;
+  time: string;
+  schedule: string;
+  venue: string;
+  gate: string;
+  linkPrefix: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+const buildInviteLink = (id: string, linkPrefix?: string) => {
+  const base = (linkPrefix || "https://undangan.ftunisma.online/invite").replace(
+    /\/$/,
+    ""
+  );
+  return `${base}/${encodeURIComponent(id)}`;
+};
 
 const statusTheme: Record<
-  RSVPStatus,
+  InviteStatus,
   { label: string; badge: string; dot: string }
 > = {
   draft: {
@@ -48,9 +68,19 @@ const statusTheme: Record<
   },
 };
 
-const statusOrder: RSVPStatus[] = ["draft", "sent", "confirmed"];
+const statusOrder: InviteStatus[] = ["draft", "sent", "confirmed"];
 
 export default function Home() {
+  const [events, setEvents] = useState<EventRecord[]>([]);
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+  const [eventForm, setEventForm] = useState({
+    name: "",
+    date: "",
+    time: "",
+    venue: "",
+    gate: "",
+  });
+  const [eventBusy, setEventBusy] = useState(false);
   const [attendees, setAttendees] = useState<AttendeeRecord[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const FALLBACK_PROGRAM = "Belum ditentukan";
@@ -59,7 +89,6 @@ export default function Home() {
   const [formData, setFormData] = useState({
     name: "",
     program: "",
-    phone: "",
     email: "",
     npm: "",
     seat: "",
@@ -67,7 +96,7 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState(true);
   const [formBusy, setFormBusy] = useState(false);
   const [actionId, setActionId] = useState<string | null>(null);
-  const [waActionId, setWaActionId] = useState<string | null>(null);
+  const [emailActionId, setEmailActionId] = useState<string | null>(null);
   const [reportBusy, setReportBusy] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
@@ -75,7 +104,7 @@ export default function Home() {
   const [searchTerm, setSearchTerm] = useState("");
   const [pageSize, setPageSize] = useState(5);
   const [pageIndex, setPageIndex] = useState(1);
-  const [statusFilter, setStatusFilter] = useState<"all" | RSVPStatus>("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | InviteStatus>("all");
   const redirectRef = useRef(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [importBusy, setImportBusy] = useState(false);
@@ -97,10 +126,61 @@ export default function Home() {
     window.location.href = "/auth/login";
   }, []);
 
-  const fetchAttendees = useCallback(async () => {
+  const handleCreateEvent = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (
+      !eventForm.name.trim() ||
+      !eventForm.date.trim() ||
+      !eventForm.time.trim() ||
+      !eventForm.venue.trim() ||
+      !eventForm.gate.trim()
+    ) {
+      setError("Lengkapi data acara terlebih dahulu.");
+      return;
+    }
+
+    setEventBusy(true);
+    setFeedback(null);
+    try {
+      const res = await fetch("/api/events", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(eventForm),
+      });
+
+      if (res.status === 401) {
+        handleUnauthorized();
+        return;
+      }
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message ?? "Gagal membuat acara.");
+
+      const created = data as EventRecord;
+      setEvents((prev) => [created, ...prev]);
+      setSelectedEventId(created.id);
+      setEventForm({ name: "", date: "", time: "", venue: "", gate: "" });
+      await fetchAttendees(created.id);
+      setFeedback("Acara baru berhasil dibuat.");
+      setError(null);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setEventBusy(false);
+    }
+  };
+
+  const handleChangeEvent = async (nextId: string) => {
+    setSelectedEventId(nextId);
+    setSelectedId(null);
+    await fetchAttendees(nextId);
+  };
+
+  const fetchAttendees = useCallback(async (eventId: string) => {
     setIsLoading(true);
     try {
-      const res = await fetch("/api/attendees", {
+      const res = await fetch(`/api/attendees?eventId=${encodeURIComponent(eventId)}`, {
         cache: "no-store",
         credentials: "include",
       });
@@ -120,9 +200,41 @@ export default function Home() {
     }
   }, [handleUnauthorized]);
 
+  const fetchEvents = useCallback(async () => {
+    try {
+      const res = await fetch("/api/events", {
+        cache: "no-store",
+        credentials: "include",
+      });
+      if (res.status === 401) {
+        handleUnauthorized();
+        return;
+      }
+      if (!res.ok) throw new Error("Gagal memuat data acara");
+      const data = (await res.json()) as { events: EventRecord[] };
+      const nextEvents = data.events ?? [];
+      setEvents(nextEvents);
+
+      if (!nextEvents.length) return;
+
+      const nextSelected =
+        selectedEventId && nextEvents.some((ev) => ev.id === selectedEventId)
+          ? selectedEventId
+          : nextEvents[0].id;
+
+      setSelectedEventId(nextSelected);
+      await fetchAttendees(nextSelected);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }, [fetchAttendees, handleUnauthorized, selectedEventId]);
+
   useEffect(() => {
-    fetchAttendees();
-  }, [fetchAttendees]);
+    void fetchEvents();
+  }, [fetchEvents]);
+
+  const selectedEvent =
+    events.find((item) => item.id === selectedEventId) ?? events[0] ?? null;
 
   const selectedAttendee =
     attendees.find((item) => item.id === selectedId) ?? attendees[0] ?? null;
@@ -157,7 +269,7 @@ export default function Home() {
     });
     const filtered = copy.filter((item) => {
       const matchesSearch = term
-        ? [item.name, item.program, item.phone, item.email, item.npm, item.id].some(
+        ? [item.name, item.program, item.email, item.npm, item.id].some(
             (value) => value.toLowerCase().includes(term)
           )
         : true;
@@ -184,7 +296,8 @@ export default function Home() {
 
   const handleAddAttendee = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!formData.name || !formData.phone) return;
+    if (!selectedEventId) return;
+    if (!formData.name || !formData.email) return;
 
     setFormBusy(true);
     try {
@@ -194,6 +307,7 @@ export default function Home() {
         credentials: "include",
         body: JSON.stringify({
           ...formData,
+          eventId: selectedEventId,
           program: formData.program.trim() || FALLBACK_PROGRAM,
           email: formData.email.trim(),
           npm: formData.npm.trim() || "-",
@@ -211,7 +325,7 @@ export default function Home() {
 
       setAttendees((prev) => [...prev, data]);
       setSelectedId(data.id);
-      setFormData({ name: "", program: "", phone: "", email: "", npm: "", seat: "" });
+      setFormData({ name: "", program: "", email: "", npm: "", seat: "" });
       setFeedback("Data peserta tersimpan.");
       setError(null);
     } catch (err) {
@@ -227,11 +341,11 @@ export default function Home() {
     );
   };
 
-  const handleSendWhatsApp = async (attendee: AttendeeRecord) => {
-    setWaActionId(attendee.id);
+  const handleSendEmail = async (attendee: AttendeeRecord) => {
+    setEmailActionId(attendee.id);
     setFeedback(null);
     try {
-      const res = await fetch("/api/whatsapp/send", {
+      const res = await fetch("/api/email/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -250,22 +364,26 @@ export default function Home() {
         syncUpdatedAttendee(data.attendee as AttendeeRecord);
       }
 
-      setFeedback(data.gatewayMessage ?? "Pesan dijadwalkan ke gateway.");
+      setFeedback(data.message ?? "Undangan berhasil dikirim via email.");
       setError(null);
     } catch (err) {
       setError((err as Error).message);
     } finally {
-      setWaActionId(null);
+      setEmailActionId(null);
     }
   };
 
   const handleDownloadReport = async () => {
+    if (!selectedEventId) return;
     setReportBusy(true);
     setFeedback(null);
     try {
-      const res = await fetch("/api/reports/attendance", {
+      const res = await fetch(
+        `/api/reports/attendance?eventId=${encodeURIComponent(selectedEventId)}`,
+        {
         credentials: "include",
-      });
+        }
+      );
       if (res.status === 401) {
         handleUnauthorized();
         return;
@@ -358,6 +476,7 @@ export default function Home() {
 
   const handleImportCsv = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!selectedEventId) return;
     const file = fileInputRef.current?.files?.[0];
     if (!file) {
       setError("Pilih file CSV terlebih dahulu.");
@@ -371,6 +490,7 @@ export default function Home() {
       form.append("file", file);
       form.append("defaultProgram", defaultProgram);
       form.append("defaultSeat", defaultSeat);
+      form.append("eventId", selectedEventId);
 
       const res = await fetch("/api/attendees/import", {
         method: "POST",
@@ -386,7 +506,7 @@ export default function Home() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.message ?? "Gagal mengimpor CSV");
 
-      await fetchAttendees();
+      await fetchAttendees(selectedEventId);
       setFeedback(`Berhasil menambah ${data.inserted} peserta.`);
       if (data.errors?.length) {
         setError(
@@ -415,11 +535,11 @@ export default function Home() {
                 Fakultas Teknik
               </p>
               <h1 className="text-3xl font-semibold text-slate-900 md:text-4xl">
-                Sistem RSVP Yudisium
+                Sistem Pelepasan
               </h1>
               <p className="text-slate-600">
                 Data peserta tersimpan di server melalui API route, siap
-                digunakan panitia untuk distribusi WA resmi dan validasi QR.
+                digunakan panitia untuk distribusi email resmi dan validasi QR.
               </p>
             </div>
             <div className="flex flex-wrap gap-3">
@@ -433,7 +553,7 @@ export default function Home() {
               </button>
               <button
                 type="button"
-                onClick={fetchAttendees}
+                onClick={() => selectedEventId && fetchAttendees(selectedEventId)}
                 className="inline-flex items-center justify-center rounded-full border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-800 transition hover:border-slate-300"
               >
                 Refresh data
@@ -473,7 +593,7 @@ export default function Home() {
         <section className="grid gap-4 md:grid-cols-4">
           <StatCard
             icon={<Users className="h-5 w-5 text-slate-500" />}
-            label="Total RSVP"
+            label="Total undangan"
             value={stats.total}
             helper={isLoading ? "memuat..." : "seluruh program studi"}
           />
@@ -498,45 +618,133 @@ export default function Home() {
         </section>
 
         <section className="grid gap-6 lg:grid-cols-5">
+          <div className="space-y-4 rounded-3xl bg-white p-6 shadow-sm lg:col-span-5">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="min-w-60 flex-1">
+                <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
+                  Acara Aktif
+                </p>
+                <select
+                  value={selectedEventId ?? ""}
+                  onChange={(e) => void handleChangeEvent(e.target.value)}
+                  className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-900 focus:border-slate-900 focus:outline-none"
+                >
+                  {!events.length && <option value="">Belum ada acara</option>}
+                  {events.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <details className="rounded-2xl border border-dashed border-slate-300 bg-slate-50/60 p-4">
+              <summary className="cursor-pointer text-sm font-semibold uppercase tracking-[0.2em] text-slate-600">
+                Tambah Acara Baru
+              </summary>
+              <form onSubmit={handleCreateEvent} className="mt-4 grid gap-3 md:grid-cols-2">
+                <FormField
+                  label="Nama acara"
+                  name="name"
+                  placeholder="Nama acara"
+                  value={eventForm.name}
+                  onChange={(e) =>
+                    setEventForm((prev) => ({ ...prev, name: e.target.value }))
+                  }
+                  required
+                />
+                <FormField
+                  label="Tanggal"
+                  name="date"
+                  placeholder="Jumat, 13 Februari 2026"
+                  value={eventForm.date}
+                  onChange={(e) =>
+                    setEventForm((prev) => ({ ...prev, date: e.target.value }))
+                  }
+                  required
+                />
+                <FormField
+                  label="Waktu"
+                  name="time"
+                  placeholder="17.45 WIB"
+                  value={eventForm.time}
+                  onChange={(e) =>
+                    setEventForm((prev) => ({ ...prev, time: e.target.value }))
+                  }
+                  required
+                />
+                <FormField
+                  label="Lokasi"
+                  name="venue"
+                  placeholder="Gedung Pascasarjana Lantai 7 Universitas Islam Malang"
+                  value={eventForm.venue}
+                  onChange={(e) =>
+                    setEventForm((prev) => ({ ...prev, venue: e.target.value }))
+                  }
+                  required
+                />
+                <div className="md:col-span-2">
+                  <FormField
+                    label="Registrasi"
+                    name="gate"
+                    placeholder="Registrasi dibuka pukul 17.00 WIB"
+                    value={eventForm.gate}
+                    onChange={(e) =>
+                      setEventForm((prev) => ({ ...prev, gate: e.target.value }))
+                    }
+                    required
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <button
+                    type="submit"
+                    disabled={eventBusy}
+                    className="inline-flex items-center justify-center rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {eventBusy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    Simpan acara
+                  </button>
+                </div>
+              </form>
+            </details>
+          </div>
           <div className="space-y-4 rounded-3xl bg-white p-6 shadow-sm lg:col-span-3">
             <div className="flex items-center justify-between">
               <div>
                 <h2 className="text-lg font-semibold">Detail acara</h2>
                 <p className="text-sm text-slate-500">
-                  Informasi otomatis tersemat di RSVP digital.
+                  Informasi otomatis tersemat di undangan digital.
                 </p>
               </div>
               <CalendarDays className="h-6 w-6 text-slate-400" />
             </div>
             <div className="space-y-4">
-              <EventRow label="Nama acara" value={eventConfig.name} />
-              <EventRow label="Jadwal" value={eventConfig.schedule} />
-              <EventRow label="Lokasi" value={eventConfig.venue} />
-              <EventRow label="Alur registrasi" value={eventConfig.gate} />
+              <EventRow label="Nama acara" value={selectedEvent?.name ?? "-"} />
+              <EventRow label="Tanggal" value={selectedEvent?.date ?? "-"} />
+              <EventRow label="Waktu" value={selectedEvent?.time ?? "-"} />
+              <EventRow label="Lokasi" value={selectedEvent?.venue ?? "-"} />
+              <EventRow label="Registrasi" value={selectedEvent?.gate ?? "-"} />
             </div>
           </div>
           <div className="rounded-3xl bg-slate-900 p-6 text-white shadow-lg lg:col-span-2">
             <p className="text-sm uppercase tracking-[0.3em] text-emerald-300">
-              rsvp digital
+              undangan digital
             </p>
             <h3 className="mt-4 text-2xl font-semibold">
-              Template WhatsApp siap pakai
+              Template Email siap kirim
             </h3>
             <p className="mt-3 text-sm text-slate-300">
-              API menggunakan template resmi sehingga panitia tinggal tekan satu
-              tombol untuk menjadwalkan pengiriman.
+              API menggunakan email resmi sehingga panitia tinggal tekan satu
+              tombol untuk mengirim undangan.
             </p>
             <div className="mt-6 grid gap-4 text-sm">
               <div className="rounded-2xl border border-white/20 bg-white/5 p-3 backdrop-blur">
-                <p className="text-xs text-slate-300">Contoh payload gateway</p>
+                <p className="text-xs text-slate-300">Contoh pengiriman email</p>
                 <pre className="mt-2 text-xs text-emerald-200">
                   {`{
-  to: "+62xxxx",
-  template: "rsvp_yudisium_ft_2026",
-  variables: {
-    nama: "Nama Peserta",
-    tautan: "undangan.ftunisma.online/invite/RSVP-001"
-  }
+  to: "peserta@contoh.com",
+  subject: "Undangan • Pelepasan Calon Wisudawan/wati",
+  body: "Tautan undangan: undangan.ftunisma.online/invite/INV-001"
 }`}
                 </pre>
               </div>
@@ -635,14 +843,6 @@ export default function Home() {
                     onChange={handleFormChange}
                   />
                   <FormField
-                    label="Nomor WhatsApp"
-                    name="phone"
-                    placeholder="62812xxxxxxx"
-                    value={formData.phone}
-                    onChange={handleFormChange}
-                    required
-                  />
-                  <FormField
                     label="Nomor kursi (opsional)"
                     name="seat"
                     placeholder="A25"
@@ -676,8 +876,7 @@ export default function Home() {
                   <p className="text-sm text-slate-500">
                     Format kolom minimal:{" "}
                     <code className="font-mono">name</code>,{" "}
-                    <code className="font-mono">email</code>, dan{" "}
-                    <code className="font-mono">phone</code>. Kolom opsional:{" "}
+                    <code className="font-mono">email</code>. Kolom opsional:{" "}
                     <code className="font-mono">program</code>,{" "}
                     <code className="font-mono">npm</code>,{" "}
                     <code className="font-mono">seat</code>.
@@ -731,7 +930,7 @@ export default function Home() {
               <div className="space-y-1">
                 <h2 className="text-lg font-semibold">Daftar peserta</h2>
                 <p className="text-xs text-slate-500">
-                  Ringkas dengan pencarian instan; kirim WA & validasi QR dari
+                  Ringkas dengan pencarian instan; kirim email & validasi QR dari
                   satu tempat.
                 </p>
               </div>
@@ -744,7 +943,7 @@ export default function Home() {
                 <select
                   value={statusFilter}
                   onChange={(e) => {
-                    setStatusFilter(e.target.value as "all" | RSVPStatus);
+                    setStatusFilter(e.target.value as "all" | InviteStatus);
                     setPageIndex(1);
                   }}
                   className="rounded-2xl border border-slate-200 px-3 py-2 text-xs text-slate-900 focus:border-slate-900 focus:outline-none"
@@ -756,7 +955,7 @@ export default function Home() {
                 </select>
                 <input
                   type="search"
-                  placeholder="Cari nama / prodi / nomor…"
+                  placeholder="Cari nama / prodi / email / npm…"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="w-56 rounded-2xl border border-slate-200 px-4 py-2 text-xs text-slate-900 placeholder:text-slate-400 focus:border-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900/10"
@@ -805,9 +1004,6 @@ export default function Home() {
                           <p className="text-xs text-slate-400">
                             {attendee.email}
                           </p>
-                          <p className="text-xs text-slate-400">
-                            {attendee.phone}
-                          </p>
                         </button>
                       </td>
                       <td className="px-4 py-4">
@@ -831,11 +1027,11 @@ export default function Home() {
                         <div className="flex flex-wrap gap-2">
                           <button
                             type="button"
-                            onClick={() => handleSendWhatsApp(attendee)}
-                            disabled={waActionId === attendee.id}
+                            onClick={() => handleSendEmail(attendee)}
+                            disabled={emailActionId === attendee.id}
                             className="inline-flex items-center rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-slate-300 disabled:cursor-not-allowed disabled:opacity-60"
                           >
-                            {waActionId === attendee.id ? (
+                            {emailActionId === attendee.id ? (
                               <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
                             ) : (
                               <Send className="mr-1.5 h-3.5 w-3.5" />
@@ -903,7 +1099,10 @@ export default function Home() {
                     {selectedAttendee.name}
                   </h3>
                   <p className="text-sm text-slate-500">
-                    {buildInviteLink(selectedAttendee.id)}
+                    {buildInviteLink(
+                      selectedAttendee.id,
+                      selectedEvent?.linkPrefix
+                    )}
                   </p>
                 </div>
                 <QrCode className="h-6 w-6 text-slate-300" />
@@ -929,16 +1128,16 @@ export default function Home() {
               </p>
               <ul className="space-y-4 text-sm">
                   <TimelineItem
-                    title="RSVP dibuat"
+                    title="Undangan dibuat"
                     value={new Date(selectedAttendee.createdAt).toLocaleString(
                       "id-ID"
                     )}
                   />
                 <TimelineItem
-                  title="Terkirim via WhatsApp"
+                  title="Terkirim via Email"
                   value={
-                    selectedAttendee.whatsappSent
-                      ? "Sudah dijadwalkan"
+                    selectedAttendee.emailSent
+                      ? "Sudah dikirim"
                       : "Belum dikirim"
                   }
                 />

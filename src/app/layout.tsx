@@ -13,9 +13,10 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "RSVP Yudisium FT",
+  title:
+    "Pelepasan Calon Wisudawan/wati Fakultas Teknik Universitas Islam Malang Periode 78 Tahun 2026",
   description:
-    "Platform RSVP digital yudisium Fakultas Teknik UNISMA dengan QR dan pelacakan kehadiran.",
+    "Platform undangan digital pelepasan calon wisudawan/wati Fakultas Teknik Universitas Islam Malang dengan QR dan pelacakan kehadiran.",
 };
 
 export default function RootLayout({

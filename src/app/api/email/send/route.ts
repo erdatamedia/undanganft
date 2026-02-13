@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server";
 import { getUserFromSession } from "@/lib/auth";
-import { buildInviteLink, eventConfig } from "@/lib/event";
+import { buildInviteLink, getEvent, resolveEvent, type EventRecord } from "@/lib/event";
 import {
   getAttendee,
-  normalizePhone,
   updateAttendee,
   type AttendeeRecord,
 } from "@/lib/storage";
@@ -20,18 +19,21 @@ type RequestBody = {
   message?: string;
 };
 
-function composeDefaultMessage(attendee: AttendeeRecord, qrLink?: string) {
-  // Gunakan field yang memang ada di eventConfig; alamat opsional jika dikonfigurasi terpisah
-  const scheduleLine = eventConfig.schedule || "Jumat, 20 Juni 2025 • 18:00";
-  const maybeAddress = (eventConfig as unknown as { address?: string }).address;
+function composeDefaultMessage(
+  attendee: AttendeeRecord,
+  event: EventRecord,
+  qrLink?: string
+) {
+  const scheduleLine = event.schedule || "Jumat, 20 Juni 2025 • 18:00";
+  const maybeAddress = (event as unknown as { address?: string }).address;
 
   const lines = [
     `Kepada Yth. Bapak/Ibu/Saudara/i - ${attendee.name.toUpperCase()}`,
     ``,
-    `Pesan ini merupakan pengingat acara ${eventConfig.name} yang akan diselenggarakan pada :`,
+    `Pesan ini merupakan pengingat acara ${event.name} yang akan diselenggarakan pada :`,
     ``,
     `Jadwal : ${scheduleLine}`,
-    `Tempat : ${eventConfig.venue}`,
+    `Tempat : ${event.venue}`,
   ];
 
   if (maybeAddress && maybeAddress.trim()) {
@@ -52,7 +54,7 @@ function composeDefaultMessage(attendee: AttendeeRecord, qrLink?: string) {
     ``,
     `Terima kasih atas perhatian dan kehadiran Bapak/Ibu/Saudara/i.`,
     ``,
-    `Catatan : RSVP ini berlaku untuk peserta terdaftar.`
+    `Catatan : Undangan ini berlaku untuk peserta terdaftar.`
   );
 
   return lines.join("\n");
@@ -83,15 +85,16 @@ export async function POST(req: Request) {
   const attendee = await getAttendee(body.attendeeId);
   if (!attendee) {
     return NextResponse.json(
-      { message: "Data RSVP tidak ditemukan" },
+      { message: "Data undangan tidak ditemukan" },
       { status: 404 }
     );
   }
 
-  const qrLink = buildInviteLink(attendee.id);
+  const event = (await getEvent(attendee.eventId)) ?? (await resolveEvent());
+  const qrLink = buildInviteLink(attendee.id, event.linkPrefix);
 
   const message =
-    body.message?.trim() || composeDefaultMessage(attendee, qrLink);
+    body.message?.trim() || composeDefaultMessage(attendee, event, qrLink);
 
   if (!attendee.email) {
     return NextResponse.json(
@@ -107,7 +110,7 @@ export async function POST(req: Request) {
     auth: { user: EMAIL_USER, pass: EMAIL_PASS },
   });
 
-  const subject = `Undangan RSVP • ${eventConfig.name}`;
+  const subject = `Undangan • ${event.name}`;
   await transporter.sendMail({
     from: EMAIL_FROM,
     to: attendee.email,
@@ -117,12 +120,13 @@ export async function POST(req: Request) {
 
   const updated = await updateAttendee(attendee.id, (current) => ({
     ...current,
-    whatsappSent: true,
+    emailSent: true,
     status: current.status === "draft" ? "sent" : current.status,
   }));
 
   return NextResponse.json({
     status: "sent",
+    message: "Undangan berhasil dikirim via email.",
     attendee: updated,
     email: { to: attendee.email },
   });

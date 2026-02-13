@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { parse } from "csv-parse/sync";
 import { getUserFromSession } from "@/lib/auth";
+import { resolveEvent } from "@/lib/event";
 import {
   addAttendee,
   clearAttendees,
@@ -26,6 +27,9 @@ export async function POST(req: Request) {
   const defaultProgram =
     (formData.get("defaultProgram") as string)?.trim() || "Lainnya";
   const defaultSeat = (formData.get("defaultSeat") as string)?.trim() || "-";
+  const selectedEvent = await resolveEvent(
+    (formData.get("eventId") as string | null) ?? null
+  );
 
   const text = await file.text();
   let rows: Record<string, string>[] = [];
@@ -61,7 +65,7 @@ export async function POST(req: Request) {
     );
   }
 
-  await clearAttendees();
+  await clearAttendees(selectedEvent.id);
 
   const inserted: string[] = [];
   const errors: { row: number; message: string }[] = [];
@@ -89,26 +93,6 @@ export async function POST(req: Request) {
       name = Object.values(row).find((value) => value?.trim()) ?? "";
     }
     name = name.trim().replace(/\s+/g, " ");
-
-    const phoneCandidates = [
-      "phone",
-      "hp",
-      "nomor",
-      "nomor_hp",
-      "nomor_hp_wa_aktif",
-      "telepon",
-      "nohp",
-      "no_telp",
-      "wa",
-      "whatsapp",
-    ];
-    let phone = pickValue(phoneCandidates);
-    if (!phone) {
-      phone =
-        Object.values(row).find(
-          (value) => value && /\d/.test(value.replace(/[^\d]/g, ""))
-        ) ?? "";
-    }
 
     const emailCandidates = ["email", "email_address", "alamat_email"];
     let email = pickValue(emailCandidates);
@@ -144,10 +128,10 @@ export async function POST(req: Request) {
           ? seatSource.slice(0, 10)
           : defaultSeat;
 
-    if (!name || !phone || !email) {
+    if (!name || !email) {
       errors.push({
         row: index + 2,
-        message: "Kolom name, email, dan phone wajib diisi.",
+        message: "Kolom name dan email wajib diisi.",
       });
       continue;
     }
@@ -155,19 +139,20 @@ export async function POST(req: Request) {
     const payload: AttendeePayload = {
       name,
       program,
-      phone,
+      phone: "-",
       email,
       npm,
       seat,
+      eventId: selectedEvent.id,
     };
 
     try {
-      const baseId = normalizeAttendeeId(name);
+      const baseId = normalizeAttendeeId(`${selectedEvent.id}-${name}`);
       const nextCount = (idCounts.get(baseId) ?? 0) + 1;
       idCounts.set(baseId, nextCount);
       const uniqueId = nextCount === 1 ? baseId : `${baseId}-${nextCount}`;
 
-      const attendee = await addAttendee(payload, uniqueId);
+      const attendee = await addAttendee(payload, selectedEvent.id, uniqueId);
       inserted.push(attendee.id);
     } catch (error) {
       errors.push({

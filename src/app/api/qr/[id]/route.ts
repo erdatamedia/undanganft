@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import QRCode from "qrcode";
-import { buildInviteLink } from "@/lib/event";
+import { buildInviteLink, getEvent } from "@/lib/event";
+import { getAttendee } from "@/lib/storage";
 
 export const dynamic = "force-dynamic";
 
@@ -10,7 +11,9 @@ export async function GET(
 ) {
   try {
     const { id } = await context.params; // Next.js 16: params adalah Promise
-    const url = buildInviteLink(id);
+    const attendee = await getAttendee(id);
+    const event = attendee ? await getEvent(attendee.eventId) : null;
+    const url = buildInviteLink(id, event?.linkPrefix);
     const png = await QRCode.toBuffer(url, {
       errorCorrectionLevel: "M",
       width: 800,

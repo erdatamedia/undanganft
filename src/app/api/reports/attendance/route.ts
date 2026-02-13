@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getUserFromSession } from "@/lib/auth";
 import { readAttendees, type AttendeeRecord } from "@/lib/storage";
-import { eventConfig } from "@/lib/event";
+import { resolveEvent } from "@/lib/event";
 import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
 
 export const runtime = "nodejs";
@@ -36,13 +36,15 @@ function buildProgramSummary(attendees: AttendeeRecord[]): ProgramSummary[] {
   );
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   const user = await getUserFromSession();
   if (!user) {
     return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
   }
 
-  const attendees = await readAttendees();
+  const url = new URL(req.url);
+  const event = await resolveEvent(url.searchParams.get("eventId"));
+  const attendees = await readAttendees(event.id);
   const summaries = buildProgramSummary(attendees);
 
   const pdfDoc = await PDFDocument.create();
@@ -81,9 +83,9 @@ export async function GET() {
 
   drawText("Rekap Kehadiran", margin, 16, true, rgb(0.07, 0.09, 0.15));
   moveDown(16);
-  drawText(eventConfig.name, margin, 11, true, rgb(0.22, 0.25, 0.32));
+  drawText(event.name, margin, 11, true, rgb(0.22, 0.25, 0.32));
   moveDown(11);
-  drawText(`${eventConfig.schedule} • ${eventConfig.venue}`, margin, 10);
+  drawText(`${event.schedule} • ${event.venue}`, margin, 10);
   moveDown(10);
   drawText(
     `Dicetak: ${new Date().toLocaleString("id-ID")}`,

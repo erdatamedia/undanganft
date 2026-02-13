@@ -11,8 +11,8 @@ Panduan singkat untuk deploy ke VPS berbasis Ubuntu dengan PM2.
 ## 2) Clone & Install
 
 ```bash
-git clone git@github.com:erdatamedia/rsvpft.git
-cd rsvpft
+git clone git@github.com:erdatamedia/undanganft.git
+cd undanganft
 pnpm install
 ```
 
@@ -58,7 +58,7 @@ Contoh server block:
 ```
 server {
   listen 80;
-  server_name rsvp.example.com;
+  server_name undangan.example.com;
 
   location / {
     proxy_pass http://127.0.0.1:3000;
@@ -77,5 +77,5 @@ server {
 git pull
 pnpm install
 pnpm build
-pm2 restart rsvpft
+pm2 restart undanganft
 ```

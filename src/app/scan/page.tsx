@@ -40,6 +40,7 @@ export default function ScanPage() {
   const manualInputRef = useRef<HTMLInputElement>(null);
   const lastSubmittedRef = useRef<string>("");
   const lastSubmitAtRef = useRef<number>(0);
+  const scanBufferRef = useRef("");
 
   const redirectToLogin = useCallback(() => {
     window.location.href = "/auth/login?redirect=%2Fscan";
@@ -75,7 +76,7 @@ export default function ScanPage() {
   const parseScannerInput = (raw: string): ScanPayload => {
     const trimmed = raw.trim();
     if (!trimmed) {
-      throw new Error("Kode RSVP kosong.");
+      throw new Error("Kode undangan kosong.");
     }
 
     if (trimmed.startsWith("{")) {
@@ -92,7 +93,50 @@ export default function ScanPage() {
   const normalizeInviteId = (value: string) =>
     value.trim().replace(/\s+/g, " ").toUpperCase();
 
-  const submitManualPayload = async (value: string) => {
+  const confirmAttendance = useCallback(async (payload: ScanPayload) => {
+    setStatus("loading");
+    setMessage("Memproses konfirmasi...");
+    const normalizedId = normalizeInviteId(payload.inviteId);
+    setLastPayload({ ...payload, inviteId: normalizedId });
+    try {
+      const res = await fetch(
+        `/api/attendees/${encodeURIComponent(normalizedId)}/confirm`,
+        {
+          method: "POST",
+          credentials: "include",
+        }
+      );
+      if (res.status === 401) {
+        redirectToLogin();
+        return;
+      }
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message ?? "QR tidak valid");
+      let latest = data as AttendeeRecord;
+      try {
+        const detailRes = await fetch(
+          `/api/attendees/${encodeURIComponent(normalizedId)}`,
+          {
+            credentials: "include",
+            cache: "no-store",
+          }
+        );
+        if (detailRes.ok) {
+          latest = (await detailRes.json()) as AttendeeRecord;
+        }
+      } catch {
+        // fallback ke payload confirm jika fetch detail gagal
+      }
+      setScanned(latest);
+      setStatus("success");
+      setMessage("QR sah. Status hadir diperbarui.");
+    } catch (err) {
+      setStatus("error");
+      setMessage((err as Error).message);
+    }
+  }, [redirectToLogin]);
+
+  const submitManualPayload = useCallback(async (value: string) => {
     if (!value.trim()) return;
     if (status === "loading") return;
     const now = Date.now();
@@ -112,35 +156,76 @@ export default function ScanPage() {
       setStatus("error");
       setMessage((err as Error).message);
     }
-  };
+  }, [confirmAttendance, status]);
 
-  const confirmAttendance = async (payload: ScanPayload) => {
-    setStatus("loading");
-    setMessage("Memproses konfirmasi...");
-    const normalizedId = normalizeInviteId(payload.inviteId);
-    setLastPayload({ ...payload, inviteId: normalizedId });
-    try {
-      const res = await fetch(
-        `/api/attendees/${encodeURIComponent(normalizedId)}/confirm`,
-        {
-          method: "POST",
-          credentials: "include",
-        }
-      );
-      if (res.status === 401) {
-        redirectToLogin();
+  useEffect(() => {
+    if (scanMode !== "hardware") return;
+
+    const flushBuffer = () => {
+      const buffered = scanBufferRef.current.trim();
+      if (!buffered) return;
+      setManualCode(buffered);
+      void submitManualPayload(buffered);
+      scanBufferRef.current = "";
+    };
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (scanMode !== "hardware") return;
+
+      // Cegah shortcut browser (Ctrl/Cmd) saat mode scanner aktif agar tidak buka tab/fokus address bar.
+      if (event.ctrlKey || event.metaKey || event.altKey) {
+        event.preventDefault();
         return;
       }
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message ?? "QR tidak valid");
-      setScanned(data as AttendeeRecord);
-      setStatus("success");
-      setMessage("QR sah. Status hadir diperbarui.");
-    } catch (err) {
-      setStatus("error");
-      setMessage((err as Error).message);
-    }
-  };
+
+      if (
+        event.key === "Enter" ||
+        event.key === "NumpadEnter" ||
+        event.key === "Tab"
+      ) {
+        event.preventDefault();
+        flushBuffer();
+        return;
+      }
+
+      if (event.key === "Backspace") {
+        event.preventDefault();
+        scanBufferRef.current = scanBufferRef.current.slice(0, -1);
+        setManualCode(scanBufferRef.current);
+        return;
+      }
+
+      if (event.key.length === 1) {
+        event.preventDefault();
+        scanBufferRef.current += event.key;
+        setManualCode(scanBufferRef.current);
+      }
+    };
+
+    const onPaste = (event: ClipboardEvent) => {
+      event.preventDefault();
+      const text = event.clipboardData?.getData("text")?.trim() || "";
+      if (!text) return;
+      scanBufferRef.current = text;
+      setManualCode(text);
+      void submitManualPayload(text);
+      scanBufferRef.current = "";
+    };
+
+    const forceRefocus = () => {
+      manualInputRef.current?.focus({ preventScroll: true });
+    };
+
+    window.addEventListener("keydown", onKeyDown, true);
+    window.addEventListener("paste", onPaste, true);
+    window.addEventListener("blur", forceRefocus);
+
+    return () => {
+      window.removeEventListener("keydown", onKeyDown, true);
+      window.removeEventListener("paste", onPaste, true);
+      window.removeEventListener("blur", forceRefocus);
+    };
+  }, [scanMode, submitManualPayload]);
 
   const handleDetected = async (detectedCodes: { rawValue: string }[]) => {
     if (!detectedCodes.length || status === "loading") return;
@@ -169,12 +254,15 @@ export default function ScanPage() {
     // Jika scanner mengirim CR ("\r"), LF ("\n"), atau CRLF di akhir, anggap sebagai trigger submit
     if (incoming.includes("\r") || incoming.includes("\n")) {
       const cleaned = incoming.replace(/[\r\n]/g, "");
+      scanBufferRef.current = cleaned;
       setManualCode(cleaned);
       void submitManualPayload(cleaned);
+      scanBufferRef.current = "";
       return;
     }
 
     // Kalau tidak ada terminator, simpan saja sementara
+    scanBufferRef.current = incoming;
     setManualCode(incoming);
   };
 
@@ -287,6 +375,15 @@ export default function ScanPage() {
               <CheckCircle2 className="h-5 w-5" />
               QR tervalidasi
             </div>
+            {scanned.photoData && (
+              <div className="mt-4 flex justify-center">
+                <img
+                  src={scanned.photoData}
+                  alt={`Foto ${scanned.name}`}
+                  className="h-28 w-28 rounded-2xl border border-white/20 object-cover"
+                />
+              </div>
+            )}
             <p className="mt-3 text-2xl font-semibold text-white">
               {scanned.name}
             </p>

@@ -14,7 +14,7 @@ export async function GET(
   const attendee = await getAttendee(id);
   if (!attendee) {
     return NextResponse.json(
-      { message: "Data RSVP tidak ditemukan" },
+      { message: "Data undangan tidak ditemukan" },
       { status: 404 }
     );
   }
@@ -39,7 +39,7 @@ export async function PATCH(
 
   if (!updated) {
     return NextResponse.json(
-      { message: "Data RSVP tidak ditemukan" },
+      { message: "Data undangan tidak ditemukan" },
       { status: 404 }
     );
   }
@@ -60,7 +60,7 @@ export async function DELETE(
   const existing = await getAttendee(id);
   if (!existing) {
     return NextResponse.json(
-      { message: "Data RSVP tidak ditemukan" },
+      { message: "Data undangan tidak ditemukan" },
       { status: 404 }
     );
   }
