@@ -1,39 +1,26 @@
 import { query } from "@/lib/db";
 import { ensureEventSchema } from "@/lib/event";
 
-// Normalisasi nomor telepon ke format internasional Indonesia (E.164 tanpa '+')
 export function normalizePhone(raw: string): string {
-  // hapus semua karakter non-digit
   const digitsOnly = (raw || "").replace(/\D+/g, "");
   if (!digitsOnly) return "";
-
-  // kasus umum: 08xxxxxxx -> 628xxxxxxx
-  if (digitsOnly.startsWith("0")) {
-    return "62" + digitsOnly.slice(1);
-  }
-  // sudah 62xxxx -> biarkan
-  if (digitsOnly.startsWith("62")) {
-    return digitsOnly;
-  }
-  // 8xxxxxxxx -> 628xxxxxxxx
-  if (digitsOnly.startsWith("8")) {
-    return "62" + digitsOnly;
-  }
-  // jika ada leading 00 (kode internasional), ubah 00 -> (hapus) dan tambahkan sesuai Indonesia bila perlu
+  if (digitsOnly.startsWith("0")) return "62" + digitsOnly.slice(1);
+  if (digitsOnly.startsWith("62")) return digitsOnly;
+  if (digitsOnly.startsWith("8")) return "62" + digitsOnly;
   if (digitsOnly.startsWith("00")) {
     const n = digitsOnly.slice(2);
     if (n.startsWith("62")) return n;
-    if (n.startsWith("8")) return "62" + n; // 00 8xx -> 628xx
+    if (n.startsWith("8")) return "62" + n;
     return n;
   }
-  // fallback: kembalikan digit yang sudah dibersihkan
   return digitsOnly;
 }
 
-export type InviteStatus = "draft" | "sent" | "confirmed";
+export type InviteStatus = "draft" | "sent" | "confirmed" | "absent";
 
 export type AttendeeRecord = {
   id: string;
+  token: string;
   eventId: string;
   name: string;
   program: string;
@@ -44,6 +31,7 @@ export type AttendeeRecord = {
   photoData?: string | null;
   status: InviteStatus;
   emailSent: boolean;
+  sentAt?: string | null;
   confirmedAt?: string | null;
   createdAt: string;
   updatedAt: string;
@@ -59,6 +47,7 @@ export type AttendeePayload = Pick<
 
 export type AttendeeRow = {
   id: string;
+  token: string;
   event_id: string;
   name: string;
   program: string;
@@ -69,6 +58,7 @@ export type AttendeeRow = {
   photo_data: string | null;
   status: InviteStatus;
   whatsapp_sent: boolean;
+  sent_at: string | null;
   confirmed_at: string | null;
   created_at: string;
   updated_at: string;
@@ -76,6 +66,7 @@ export type AttendeeRow = {
 
 const mapRow = (row: AttendeeRow): AttendeeRecord => ({
   id: row.id,
+  token: row.token,
   eventId: row.event_id,
   name: row.name,
   program: row.program,
@@ -86,10 +77,51 @@ const mapRow = (row: AttendeeRow): AttendeeRecord => ({
   photoData: row.photo_data,
   status: row.status,
   emailSent: row.whatsapp_sent,
+  sentAt: row.sent_at,
   confirmedAt: row.confirmed_at,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });
+
+async function findAttendeeByIdentifier(raw: string): Promise<AttendeeRow | null> {
+  const normalized = normalizeAttendeeId(raw);
+  if (!normalized) return null;
+
+  type MatchedRow = AttendeeRow & { match_rank: number };
+  const matched = await query<MatchedRow>(
+    `select *,
+            case
+              when upper(id) = $1 then 0
+              when upper(token) = $1 then 1
+              when upper(name) = $1 then 2
+              when upper(split_part(name, ' ', 1)) = $1 then 3
+              when upper(name) like $2 then 4
+              when upper(id) like $3 then 5
+              else 99
+            end as match_rank
+     from attendees
+     where upper(id) = $1
+        or upper(token) = $1
+        or upper(name) = $1
+        or upper(split_part(name, ' ', 1)) = $1
+        or upper(name) like $2
+        or upper(id) like $3
+     order by match_rank asc, created_at desc
+     limit 1`,
+    [normalized, `${normalized}%`, `%-${normalized}%`]
+  );
+
+  return matched[0] ?? null;
+}
+
+export async function findAttendeeByToken(token: string): Promise<AttendeeRow | null> {
+  await ensureEventSchema();
+  const rows = await query<AttendeeRow>(
+    "select * from attendees where token=$1 limit 1",
+    [token]
+  );
+  return rows[0] ?? null;
+}
 
 export function normalizeAttendeeId(raw: string) {
   let value = raw || "";
@@ -122,8 +154,8 @@ export async function addAttendee(
     providedId || `${eventId}-${payload.name}`
   );
   const rows = await query<AttendeeRow>(
-    `insert into attendees (id, event_id, name, program, phone, email, npm, seat, status, whatsapp_sent)
-     values ($1, $2, $3, $4, $5, $6, coalesce($7, '-'), coalesce($8, '-'), 'draft', false)
+    `insert into attendees (id, token, event_id, name, program, phone, email, npm, seat, status, whatsapp_sent)
+     values ($1, gen_random_uuid()::text, $2, $3, $4, $5, $6, coalesce($7, '-'), coalesce($8, '-'), 'draft', false)
      returning *`,
     [
       nextId,
@@ -144,8 +176,9 @@ export async function updateAttendee(
   updater: (current: AttendeeRecord) => AttendeeRecord
 ) {
   await ensureEventSchema();
-  const normalizedId = normalizeAttendeeId(id);
-  const current = await getAttendee(normalizedId);
+  const currentRow = await findAttendeeByIdentifier(id);
+  const normalizedId = currentRow?.id;
+  const current = currentRow ? mapRow(currentRow) : null;
   if (!current) return null;
 
   const nextState = updater(current);
@@ -160,9 +193,10 @@ export async function updateAttendee(
          photo_data=$7,
          status=$8,
          whatsapp_sent=$9,
-         confirmed_at=$10,
+         sent_at=$10,
+         confirmed_at=$11,
          updated_at=now()
-     where id=$11
+     where id=$12
      returning *`,
     [
       nextState.name,
@@ -174,7 +208,8 @@ export async function updateAttendee(
       nextState.photoData ?? null,
       nextState.status,
       nextState.emailSent,
-      nextState.confirmedAt,
+      nextState.sentAt ?? null,
+      nextState.confirmedAt ?? null,
       normalizedId,
     ]
   );
@@ -183,11 +218,8 @@ export async function updateAttendee(
 
 export async function getAttendee(id: string) {
   await ensureEventSchema();
-  const rows = await query<AttendeeRow>(
-    "select * from attendees where id=$1 limit 1",
-    [normalizeAttendeeId(id)]
-  );
-  return rows[0] ? mapRow(rows[0]) : null;
+  const row = await findAttendeeByIdentifier(id);
+  return row ? mapRow(row) : null;
 }
 
 export async function clearAttendees(eventId: string) {
@@ -197,5 +229,7 @@ export async function clearAttendees(eventId: string) {
 
 export async function deleteAttendee(id: string) {
   await ensureEventSchema();
-  await query("delete from attendees where id=$1", [normalizeAttendeeId(id)]);
+  const row = await findAttendeeByIdentifier(id);
+  if (!row) return;
+  await query("delete from attendees where id=$1", [row.id]);
 }

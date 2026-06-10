@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getUserFromSession } from "@/lib/auth";
-import { createEvent, readEvents, resolveEvent, type EventPayload } from "@/lib/event";
+import { createEvent, readEvents, type EventPayload } from "@/lib/event";
 
 export async function GET() {
   const user = await getUserFromSession();
@@ -8,11 +8,7 @@ export async function GET() {
     return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
   }
 
-  let events = await readEvents();
-  if (!events.length) {
-    await resolveEvent();
-    events = await readEvents();
-  }
+  const events = await readEvents();
   return NextResponse.json({ events });
 }
 
@@ -23,25 +19,23 @@ export async function POST(req: Request) {
   }
 
   const payload = (await req.json()) as Partial<EventPayload>;
-  if (
-    !payload.name ||
-    !payload.date ||
-    !payload.time ||
-    !payload.venue ||
-    !payload.gate
-  ) {
+  if (!payload.name || !payload.date || !payload.time || !payload.venue) {
     return NextResponse.json(
-      { message: "Nama acara, tanggal, waktu, lokasi, dan registrasi wajib diisi." },
+      { message: "Nama acara, tanggal, waktu mulai, dan lokasi wajib diisi." },
       { status: 400 }
     );
   }
 
   const event = await createEvent({
     name: payload.name,
+    description: payload.description,
     date: payload.date,
     time: payload.time,
+    timeEnd: payload.timeEnd,
     venue: payload.venue,
-    gate: payload.gate,
+    gate: payload.gate ?? "",
+    bannerUrl: payload.bannerUrl,
+    status: payload.status ?? "ACTIVE",
     linkPrefix: payload.linkPrefix,
   });
 

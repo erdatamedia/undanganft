@@ -13,10 +13,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title:
-    "Pelepasan Calon Wisudawan/wati Fakultas Teknik Universitas Islam Malang Periode 78 Tahun 2026",
+  title: "Sistem Undangan Digital — Fakultas Teknik UNISMA",
   description:
-    "Platform undangan digital pelepasan calon wisudawan/wati Fakultas Teknik Universitas Islam Malang dengan QR dan pelacakan kehadiran.",
+    "Platform undangan digital multi-acara Fakultas Teknik UNISMA dengan QR scan dan rekap kehadiran.",
 };
 
 export default function RootLayout({

@@ -1,101 +1,184 @@
 import { notFound } from "next/navigation";
-import { buildInviteLink, getEvent, resolveEvent } from "@/lib/event";
+import { getEvent, resolveEvent } from "@/lib/event";
 import { getAttendee, normalizeAttendeeId } from "@/lib/storage";
 import { InviteQr } from "@/components/invite-qr";
-import { InvitePhotoUpload } from "@/components/invite-photo-upload";
 
 export const dynamic = "force-dynamic";
 
-type Props = {
-  params: { id: string };
-};
+const APP_URL =
+  process.env.NEXT_PUBLIC_APP_URL ?? "https://undangan.ftunisma.online";
 
-type MetadataProps = Props;
+type Props = { params: Promise<{ id: string }> };
 
-export async function generateMetadata(props: MetadataProps) {
-  const params = await Promise.resolve(props.params);
-  const attendee = await getAttendee(normalizeAttendeeId(params.id));
+export async function generateMetadata(props: Props) {
+  const { id } = await props.params;
+  const attendee = await getAttendee(normalizeAttendeeId(id));
   const event = attendee
     ? (await getEvent(attendee.eventId)) ?? (await resolveEvent())
     : await resolveEvent();
-  const title = attendee
-    ? `Undangan ${attendee.name} • ${event.name}`
-    : `Undangan Tidak Ditemukan • ${event.name}`;
-  const description = attendee
-    ? `Konfirmasi kehadiran ${attendee.name} pada ${event.name}`
-    : `Undangan tidak ditemukan untuk kode ${params.id}`;
   return {
-    title,
-    description,
+    title: attendee
+      ? `Undangan ${attendee.name} — ${event.name}`
+      : `Undangan Tidak Ditemukan — ${event.name}`,
+    description: attendee
+      ? `Konfirmasi kehadiran ${attendee.name} pada ${event.name}, ${event.schedule}`
+      : undefined,
   };
 }
 
 export default async function InvitePage(props: Props) {
-  const params = await Promise.resolve(props.params);
-  const attendee = await getAttendee(normalizeAttendeeId(params.id));
+  const { id } = await props.params;
+  const attendee = await getAttendee(normalizeAttendeeId(id));
+  if (!attendee) notFound();
 
-  if (!attendee) {
-    notFound();
-  }
   const event = (await getEvent(attendee.eventId)) ?? (await resolveEvent());
 
-  const qrPayload = JSON.stringify({
-    inviteId: attendee.id,
-    name: attendee.name,
-    npm: attendee.npm,
-  });
+  const inviteUrl = `${APP_URL}/invite/${encodeURIComponent(attendee.token)}`;
+  const qrPayload = inviteUrl;
+
+  const timeRange = event.timeEnd
+    ? `${event.time} – ${event.timeEnd}`
+    : event.time;
+
+  const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(event.venue)}`;
+
+  const calendarUrl = (() => {
+    const title = encodeURIComponent(event.name);
+    const location = encodeURIComponent(event.venue);
+    const details = encodeURIComponent(
+      `Undangan untuk ${attendee.name}\n${inviteUrl}`
+    );
+    return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&location=${location}&details=${details}`;
+  })();
 
   return (
-    <div className="min-h-screen bg-slate-950 px-4 py-10 text-white">
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
-        <header className="space-y-2 text-center">
-          <p className="text-xs uppercase tracking-[0.3em] text-emerald-300">Undangan resmi</p>
-          <h1 className="text-2xl font-semibold">{event.name}</h1>
-          <p className="text-sm text-slate-300">{event.schedule}</p>
-          <p className="text-sm text-slate-400">{event.venue}</p>
-        </header>
-
-        <section className="rounded-3xl bg-white/10 p-6 text-sm shadow-lg backdrop-blur">
-          <p className="text-xs uppercase tracking-[0.3em] text-emerald-300">Detail peserta</p>
-          <div className="mt-3 space-y-1 text-base">
-            <p className="font-semibold text-white">{attendee.name}</p>
-            <p className="text-slate-300">{attendee.program}</p>
-          </div>
-          <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
-            <p className="text-xs uppercase tracking-[0.2em] text-slate-400">NPM</p>
-            <p className="text-2xl font-semibold text-white">{attendee.npm}</p>
-          </div>
-          <p className="mt-4 text-sm text-slate-300">
-            Silakan hadir sesuai jadwal dan tunjukkan QR di bawah ini pada meja registrasi. Anda juga dapat menyimpan atau membagikan tautan ini: {buildInviteLink(attendee.id, event.linkPrefix)}
+    <div className="min-h-screen bg-[#F8FAF9]">
+      {/* Header */}
+      <div className="bg-[#1B4332] px-6 py-8 text-white">
+        <div className="mx-auto max-w-sm">
+          <p className="text-xs font-bold uppercase tracking-[3px] text-[#74C69D]">
+            Fakultas Teknik
           </p>
-        </section>
+          <h1 className="mt-1 text-xl font-bold leading-tight">
+            Universitas Islam Malang
+          </h1>
+          <p className="mt-1 text-xs text-white/50">Undangan Digital Resmi</p>
+        </div>
+      </div>
 
-        <InvitePhotoUpload
-          inviteId={attendee.id}
-          initialPhotoData={attendee.photoData}
-        />
-
-        <section className="rounded-3xl bg-white p-6 text-slate-900 shadow-lg">
-          <p className="text-xs uppercase tracking-[0.3em] text-emerald-600">QR konfirmasi kehadiran</p>
-          <p className="mt-2 text-sm text-slate-500">
-            Pemindaian QR akan otomatis mencatat kehadiran Anda. Pastikan layar cukup terang saat ditunjukkan kepada petugas.
+      <div className="mx-auto max-w-sm px-5 py-6 space-y-4">
+        {/* Personal greeting */}
+        <div className="rounded-2xl bg-white border border-slate-100 p-5 shadow-sm">
+          <p className="text-xs text-slate-400 mb-2">Kepada Yth,</p>
+          <h2 className="text-xl font-bold text-[#1A1A2E] leading-tight">
+            {attendee.name}
+          </h2>
+          <p className="text-sm text-[#40916C] font-medium mt-1">
+            {attendee.program}
+            {attendee.npm !== "-" && (
+              <span className="text-slate-400 font-normal"> · {attendee.npm}</span>
+            )}
           </p>
-          <div className="mt-6 flex justify-center">
-            <InviteQr value={qrPayload} size={220} />
-          </div>
-        </section>
+          {attendee.seat !== "-" && (
+            <div className="mt-3 inline-flex items-center gap-1.5 bg-[#1B4332]/10 text-[#1B4332] text-xs font-semibold px-3 py-1.5 rounded-full">
+              🪑 Nomor Kursi: {attendee.seat}
+            </div>
+          )}
+        </div>
 
-        <section className="rounded-3xl border border-slate-800 bg-slate-900/80 p-6 text-sm text-slate-200">
-          <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Alur kehadiran</p>
-          <ol className="mt-3 space-y-2 text-slate-200">
-            <li>1. Tiba di {event.venue} sebelum pukul {event.time}.</li>
-            <li>2. Tunjukkan QR ini pada meja registrasi panitia.</li>
-            <li>3. Setelah discan, Anda akan diarahkan ke area duduk sesuai arahan panitia.</li>
+        {/* Event details */}
+        <div className="rounded-2xl bg-white border border-slate-100 p-5 shadow-sm">
+          <p className="text-xs font-bold uppercase tracking-[2px] text-[#40916C] mb-3">
+            Detail Acara
+          </p>
+          <h3 className="text-base font-bold text-[#1A1A2E] leading-snug mb-3">
+            {event.name}
+          </h3>
+          <div className="space-y-2 text-sm">
+            <div className="flex items-start gap-2.5">
+              <span className="shrink-0 mt-0.5">📅</span>
+              <span className="text-slate-700">{event.date}</span>
+            </div>
+            <div className="flex items-start gap-2.5">
+              <span className="shrink-0 mt-0.5">🕐</span>
+              <span className="text-slate-700">{timeRange}</span>
+            </div>
+            <div className="flex items-start gap-2.5">
+              <span className="shrink-0 mt-0.5">📍</span>
+              <span className="text-slate-700">{event.venue}</span>
+            </div>
+            {event.gate && (
+              <div className="flex items-start gap-2.5">
+                <span className="shrink-0 mt-0.5">ℹ️</span>
+                <span className="text-slate-500 text-xs">{event.gate}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Action buttons */}
+          <div className="flex gap-2 mt-4">
+            <a
+              href={mapsUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex-1 text-center text-xs font-semibold py-2.5 px-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-700 hover:border-slate-300 transition-colors"
+            >
+              🗺️ Lihat Lokasi
+            </a>
+            <a
+              href={calendarUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex-1 text-center text-xs font-semibold py-2.5 px-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-700 hover:border-slate-300 transition-colors"
+            >
+              📆 Simpan ke Kalender
+            </a>
+          </div>
+        </div>
+
+        {/* QR Code */}
+        <div className="rounded-2xl bg-white border border-slate-100 p-5 shadow-sm text-center">
+          <p className="text-xs font-bold uppercase tracking-[2px] text-[#40916C] mb-1">
+            QR Konfirmasi Kehadiran
+          </p>
+          <p className="text-xs text-slate-400 mb-5">
+            Tunjukkan QR ini kepada petugas di meja registrasi
+          </p>
+          <div className="flex justify-center">
+            <InviteQr value={qrPayload} size={240} />
+          </div>
+          <p className="mt-4 text-xs text-slate-400 leading-relaxed">
+            Pemindaian QR akan otomatis mencatat kehadiran Anda.
+            <br />
+            Pastikan layar cukup terang saat ditunjukkan.
+          </p>
+        </div>
+
+        {/* Instructions */}
+        <div className="rounded-2xl bg-[#1B4332] p-5 text-white">
+          <p className="text-xs font-bold uppercase tracking-[2px] text-[#74C69D] mb-3">
+            Alur Kehadiran
+          </p>
+          <ol className="space-y-2 text-sm text-white/80">
+            <li className="flex gap-2.5">
+              <span className="shrink-0 font-bold text-[#74C69D]">1.</span>
+              Tiba di {event.venue} sebelum pukul {event.time}.
+            </li>
+            <li className="flex gap-2.5">
+              <span className="shrink-0 font-bold text-[#74C69D]">2.</span>
+              Tunjukkan QR di atas kepada petugas registrasi.
+            </li>
+            <li className="flex gap-2.5">
+              <span className="shrink-0 font-bold text-[#74C69D]">3.</span>
+              Setelah QR discan, ikuti arahan panitia menuju tempat duduk.
+            </li>
           </ol>
-          <p className="mt-4 text-xs text-slate-400">
-            Jika ada pertanyaan, hubungi panitia melalui email resmi yang tercantum pada undangan.
+          <p className="mt-4 text-xs text-white/40 leading-relaxed">
+            Simpan halaman ini atau tautan berikut untuk ditunjukkan saat registrasi:
+            <br />
+            <span className="text-white/60 break-all">{inviteUrl}</span>
           </p>
-        </section>
+        </div>
       </div>
     </div>
   );

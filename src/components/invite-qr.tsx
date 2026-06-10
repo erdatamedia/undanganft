@@ -2,10 +2,18 @@
 
 import { QRCodeSVG } from "qrcode.react";
 
-export function InviteQr({ value, size = 200 }: { value: string; size?: number }) {
+export function InviteQr({ value, size = 220 }: { value: string; size?: number }) {
   return (
-    <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-      <QRCodeSVG value={value} size={size} />
+    <div
+      style={{ padding: 16, background: "#FFFFFF", borderRadius: 12, display: "inline-block" }}
+    >
+      <QRCodeSVG
+        value={value}
+        size={size}
+        fgColor="#1B4332"
+        bgColor="#FFFFFF"
+        level="M"
+      />
     </div>
   );
 }
