@@ -1,4 +1,3 @@
-import QRCode from "qrcode";
 import type { AttendeeRecord } from "@/lib/storage";
 import type { EventRecord } from "@/lib/event";
 
@@ -24,19 +23,10 @@ function buildInviteUrl(token: string) {
   return `${APP_URL}/invite/${encodeURIComponent(token)}`;
 }
 
-async function generateQrDataUrl(content: string): Promise<string> {
-  return QRCode.toDataURL(content, {
-    margin: 2,
-    width: 280,
-    color: { dark: "#1B4332", light: "#FFFFFF" },
-  });
-}
-
 function htmlTemplate(
   attendee: AttendeeRecord,
   event: EventRecord,
-  inviteUrl: string,
-  qrDataUrl: string
+  inviteUrl: string
 ): string {
   const gateInfo = event.gate
     ? `<p style="margin:4px 0;color:#6B7280;font-size:13px;">${event.gate}</p>`
@@ -89,19 +79,12 @@ function htmlTemplate(
             </td>
           </tr>
           <tr>
-            <td style="padding:0 32px 20px;" align="center">
-              <p style="margin:0 0 16px;color:#6B7280;font-size:13px;text-align:center;">Tunjukkan QR ini kepada petugas di meja registrasi</p>
-              <div style="display:inline-block;background:#FFFFFF;border:2px solid #E5E7EB;border-radius:12px;padding:16px;">
-                <img src="${qrDataUrl}" alt="QR Konfirmasi Kehadiran" width="220" height="220" style="display:block;" />
-              </div>
-            </td>
-          </tr>
-          <tr>
             <td style="padding:0 32px 28px;" align="center">
+              <p style="margin:0 0 16px;color:#374151;font-size:14px;text-align:center;">Buka halaman undangan untuk menampilkan QR Code kehadiran Anda.</p>
               <a href="${inviteUrl}" style="display:inline-block;background:#1B4332;color:#FFFFFF;text-decoration:none;font-weight:700;font-size:14px;padding:14px 32px;border-radius:10px;">
-                Buka Halaman Undangan →
+                Buka Halaman Undangan &amp; QR →
               </a>
-              <p style="margin:12px 0 0;color:#9CA3AF;font-size:12px;">Simpan tautan ini:<br/><a href="${inviteUrl}" style="color:#40916C;">${inviteUrl}</a></p>
+              <p style="margin:12px 0 0;color:#9CA3AF;font-size:12px;">Atau salin tautan ini:<br/><a href="${inviteUrl}" style="color:#40916C;">${inviteUrl}</a></p>
             </td>
           </tr>
           <tr>
@@ -216,9 +199,8 @@ export async function sendInvitationEmail(
   }
 
   const inviteUrl = buildInviteUrl(attendee.token);
-  const qrDataUrl = await generateQrDataUrl(inviteUrl);
   const subject = `Undangan • ${event.name}`;
-  const html = htmlTemplate(attendee, event, inviteUrl, qrDataUrl);
+  const html = htmlTemplate(attendee, event, inviteUrl);
   const text = textFallback(attendee, event, inviteUrl);
 
   if (BREVO_API_KEY) {
