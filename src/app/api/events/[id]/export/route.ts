@@ -134,7 +134,7 @@ async function buildPdf(
   const timeRange = event.timeEnd ? `${event.time} – ${event.timeEnd}` : event.time;
   page.drawText(`${event.date}  •  ${timeRange}`, { x: margin, y, size: 9, font, color: muted });
   y -= 9 + 4;
-  page.drawText(event.venue, { x: margin, y, size: 9, font, color: muted, maxWidth: contentW });
+  page.drawText(event.venue ?? "", { x: margin, y, size: 9, font, color: muted, maxWidth: contentW });
   y -= 9 + 4;
   page.drawText(`Dicetak: ${new Date().toLocaleString("id-ID")}`, { x: margin, y, size: 8, font, color: lightGray });
   y -= 8 + 14;
@@ -256,12 +256,14 @@ async function buildPdf(
 
     const rowColor = a.status === "confirmed" ? accent : a.status === "absent" ? rgb(0.86, 0.15, 0.15) : dark;
     let cx = margin;
+    const name = a.name ?? "";
+    const program = a.program ?? "";
     const cells = [
       String(i + 1),
-      a.name.length > 26 ? a.name.slice(0, 24) + "…" : a.name,
-      a.npm,
-      a.program.length > 20 ? a.program.slice(0, 18) + "…" : a.program,
-      a.seat,
+      name.length > 26 ? name.slice(0, 24) + "..." : name,
+      a.npm ?? "",
+      program.length > 20 ? program.slice(0, 18) + "..." : program,
+      a.seat ?? "",
       statusLabel[a.status] ?? a.status,
       a.confirmedAt ? new Date(a.confirmedAt).toLocaleString("id-ID", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" }) : "-",
     ];
