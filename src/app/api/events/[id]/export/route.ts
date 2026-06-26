@@ -234,7 +234,7 @@ async function buildPdf(
   const statusLabel: Record<string, string> = {
     draft: "Draft",
     sent: "Terkirim",
-    confirmed: "Hadir ✓",
+    confirmed: "Hadir",
     absent: "Absen",
   };
 
