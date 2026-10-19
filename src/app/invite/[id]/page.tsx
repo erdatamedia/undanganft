@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { getEvent, resolveEvent } from "@/lib/event";
 import { getAttendee, normalizeAttendeeId } from "@/lib/storage";
+import { listRundownItems } from "@/lib/rundown";
 import { InviteQr } from "@/components/invite-qr";
 
 export const dynamic = "force-dynamic";
@@ -32,6 +33,7 @@ export default async function InvitePage(props: Props) {
   if (!attendee) notFound();
 
   const event = (await getEvent(attendee.eventId)) ?? (await resolveEvent());
+  const rundownItems = await listRundownItems(event.id);
 
   const inviteUrl = `${APP_URL}/invite/${encodeURIComponent(attendee.token)}`;
   const qrPayload = inviteUrl;
@@ -135,6 +137,35 @@ export default async function InvitePage(props: Props) {
             </a>
           </div>
         </div>
+
+        {/* Susunan Acara */}
+        {rundownItems.length > 0 && (
+          <details className="group rounded-2xl bg-white border border-slate-100 p-5 shadow-sm">
+            <summary className="flex items-center justify-between cursor-pointer list-none">
+              <span className="text-xs font-bold uppercase tracking-[2px] text-[#40916C]">
+                Susunan Acara
+              </span>
+              <span className="text-slate-400 text-xs group-open:rotate-180 transition-transform">
+                ▾
+              </span>
+            </summary>
+            <div className="mt-4 space-y-3">
+              {rundownItems.map((item) => (
+                <div key={item.id} className="flex gap-3 text-sm">
+                  <div className="shrink-0 w-16 text-xs font-semibold text-[#1B4332] pt-0.5">
+                    {item.timeStart ?? "-"}
+                  </div>
+                  <div className="flex-1 min-w-0 border-l border-slate-100 pl-3">
+                    <p className="text-[#1A1A2E] font-medium leading-snug">{item.title}</p>
+                    {item.durationMinutes != null && (
+                      <p className="text-xs text-slate-400 mt-0.5">{item.durationMinutes} menit</p>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </details>
+        )}
 
         {/* QR Code */}
         <div className="rounded-2xl bg-white border border-slate-100 p-5 shadow-sm text-center">

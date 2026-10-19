@@ -15,7 +15,12 @@ import {
   ArrowLeft,
   CalendarDays,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   Loader2,
+  ListOrdered,
+  Pencil,
+  Plus,
   QrCode,
   Send,
   Trash2,
@@ -28,8 +33,9 @@ import {
 } from "lucide-react";
 import type { AttendeeRecord, InviteStatus } from "@/lib/storage";
 import type { EventRecord as EventData } from "@/lib/event";
+import type { RundownAttachmentRecord, RundownItemRecord } from "@/lib/rundown";
 
-type Tab = "peserta" | "undangan" | "scan" | "laporan";
+type Tab = "peserta" | "undangan" | "scan" | "laporan" | "rundown";
 
 const statusTheme: Record<InviteStatus, { label: string; badge: string; dot: string }> = {
   draft: { label: "Belum dikirim", badge: "bg-slate-100 text-slate-600", dot: "bg-slate-400" },
@@ -140,12 +146,13 @@ export default function EventDetailPage() {
       {/* Tabs */}
       <div className="border-b border-slate-200">
         <div className="flex gap-0">
-          {(["peserta", "undangan", "scan", "laporan"] as Tab[]).map((t) => (
+          {(["peserta", "undangan", "scan", "laporan", "rundown"] as Tab[]).map((t) => (
             <TabButton key={t} active={tab === t} onClick={() => setTab(t)}>
               {t === "peserta" && <><Users size={14} /> Peserta</>}
               {t === "undangan" && <><Send size={14} /> Kirim Undangan</>}
               {t === "scan" && <><QrCode size={14} /> Scan & Kehadiran</>}
               {t === "laporan" && <><FileText size={14} /> Laporan</>}
+              {t === "rundown" && <><ListOrdered size={14} /> Rundown</>}
             </TabButton>
           ))}
         </div>
@@ -205,6 +212,14 @@ export default function EventDetailPage() {
         <LaporanTab
           eventId={eventId}
           attendees={attendees}
+          onUnauthorized={handleUnauthorized}
+          showToast={showToast}
+        />
+      )}
+
+      {tab === "rundown" && (
+        <RundownTab
+          eventId={eventId}
           onUnauthorized={handleUnauthorized}
           showToast={showToast}
         />
@@ -1229,5 +1244,583 @@ function LaporanTab({
         </div>
       </div>
     </div>
+  );
+}
+
+// ─── Rundown Tab ──────────────────────────────────────────────────────────────
+
+const emptyRundownForm = {
+  timeStart: "",
+  timeEnd: "",
+  title: "",
+  description: "",
+  pic: "",
+  technicalNotes: "",
+  audioNotes: "",
+};
+
+function RundownTab({
+  eventId,
+  onUnauthorized,
+  showToast,
+}: {
+  eventId: string;
+  onUnauthorized: () => void;
+  showToast: (msg: string, type?: "ok" | "err") => void;
+}) {
+  const [items, setItems] = useState<RundownItemRecord[]>([]);
+  const [attachments, setAttachments] = useState<RundownAttachmentRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const [addForm, setAddForm] = useState(emptyRundownForm);
+  const [addBusy, setAddBusy] = useState(false);
+
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState(emptyRundownForm);
+  const [editBusy, setEditBusy] = useState(false);
+  const [actionId, setActionId] = useState<string | null>(null);
+
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  const [importBusy, setImportBusy] = useState(false);
+
+  const [attachForm, setAttachForm] = useState({ label: "", content: "" });
+  const [attachBusy, setAttachBusy] = useState(false);
+  const [editingAttachmentId, setEditingAttachmentId] = useState<string | null>(null);
+  const [editAttachForm, setEditAttachForm] = useState({ label: "", content: "" });
+
+  const fetchItems = useCallback(async () => {
+    const res = await fetch(`/api/events/${eventId}/rundown`, { credentials: "include" });
+    if (res.status === 401) { onUnauthorized(); return; }
+    if (!res.ok) throw new Error("Gagal memuat rundown");
+    const data = await res.json();
+    setItems(data.items ?? []);
+  }, [eventId, onUnauthorized]);
+
+  const fetchAttachments = useCallback(async () => {
+    const res = await fetch(`/api/events/${eventId}/rundown/attachments`, { credentials: "include" });
+    if (res.status === 401) { onUnauthorized(); return; }
+    if (!res.ok) throw new Error("Gagal memuat naskah");
+    const data = await res.json();
+    setAttachments(data.attachments ?? []);
+  }, [eventId, onUnauthorized]);
+
+  useEffect(() => {
+    setLoading(true);
+    Promise.all([fetchItems(), fetchAttachments()])
+      .catch((err) => showToast((err as Error).message, "err"))
+      .finally(() => setLoading(false));
+  }, [fetchItems, fetchAttachments, showToast]);
+
+  const handleAdd = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!addForm.title.trim()) return;
+    setAddBusy(true);
+    try {
+      const res = await fetch(`/api/events/${eventId}/rundown`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          timeStart: addForm.timeStart || undefined,
+          timeEnd: addForm.timeEnd || undefined,
+          title: addForm.title,
+        }),
+      });
+      if (res.status === 401) { onUnauthorized(); return; }
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message ?? "Gagal menambah item rundown");
+      setItems((prev) => [...prev, data].sort((a, b) => a.order - b.order));
+      setAddForm(emptyRundownForm);
+      showToast("Item rundown ditambahkan.");
+    } catch (err) {
+      showToast((err as Error).message, "err");
+    } finally {
+      setAddBusy(false);
+    }
+  };
+
+  const openEdit = (item: RundownItemRecord) => {
+    if (expandedId === item.id) {
+      setExpandedId(null);
+      return;
+    }
+    setExpandedId(item.id);
+    setEditForm({
+      timeStart: item.timeStart ?? "",
+      timeEnd: item.timeEnd ?? "",
+      title: item.title,
+      description: item.description ?? "",
+      pic: item.pic ?? "",
+      technicalNotes: item.technicalNotes ?? "",
+      audioNotes: item.audioNotes ?? "",
+    });
+  };
+
+  const handleSaveEdit = async (itemId: string) => {
+    setEditBusy(true);
+    try {
+      const res = await fetch(`/api/events/${eventId}/rundown/${itemId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(editForm),
+      });
+      if (res.status === 401) { onUnauthorized(); return; }
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message ?? "Gagal menyimpan perubahan");
+      setItems((prev) => prev.map((it) => (it.id === data.id ? data : it)).sort((a, b) => a.order - b.order));
+      setExpandedId(null);
+      showToast("Perubahan disimpan.");
+    } catch (err) {
+      showToast((err as Error).message, "err");
+    } finally {
+      setEditBusy(false);
+    }
+  };
+
+  const handleDelete = async (item: RundownItemRecord) => {
+    if (!confirm(`Hapus item "${item.title}"? Tindakan ini tidak bisa dibatalkan.`)) return;
+    setActionId(item.id);
+    try {
+      const res = await fetch(`/api/events/${eventId}/rundown/${item.id}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (res.status === 401) { onUnauthorized(); return; }
+      if (!res.ok) throw new Error("Gagal menghapus item");
+      setItems((prev) => prev.filter((it) => it.id !== item.id));
+      showToast("Item rundown dihapus.");
+    } catch (err) {
+      showToast((err as Error).message, "err");
+    } finally {
+      setActionId(null);
+    }
+  };
+
+  const handleMove = async (item: RundownItemRecord, direction: "up" | "down") => {
+    const sorted = [...items].sort((a, b) => a.order - b.order);
+    const index = sorted.findIndex((it) => it.id === item.id);
+    const swapIndex = direction === "up" ? index - 1 : index + 1;
+    if (index === -1 || swapIndex < 0 || swapIndex >= sorted.length) return;
+
+    const neighbor = sorted[swapIndex];
+    setActionId(item.id);
+    try {
+      const res = await fetch(`/api/events/${eventId}/rundown/reorder`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          items: [
+            { id: item.id, order: neighbor.order },
+            { id: neighbor.id, order: item.order },
+          ],
+        }),
+      });
+      if (res.status === 401) { onUnauthorized(); return; }
+      if (!res.ok) throw new Error("Gagal mengubah urutan");
+      setItems((prev) =>
+        prev.map((it) => {
+          if (it.id === item.id) return { ...it, order: neighbor.order };
+          if (it.id === neighbor.id) return { ...it, order: item.order };
+          return it;
+        })
+      );
+    } catch (err) {
+      showToast((err as Error).message, "err");
+    } finally {
+      setActionId(null);
+    }
+  };
+
+  const handleImportFile = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImportBusy(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch(`/api/events/${eventId}/rundown/import`, {
+        method: "POST",
+        credentials: "include",
+        body: formData,
+      });
+      if (res.status === 401) { onUnauthorized(); return; }
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message ?? "Gagal mengimpor file");
+      await Promise.all([fetchItems(), fetchAttachments()]);
+      showToast(`Berhasil mengimpor ${data.imported} item rundown + ${data.attachments} naskah lampiran.`);
+    } catch (err) {
+      showToast((err as Error).message, "err");
+    } finally {
+      setImportBusy(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  };
+
+  const handleAddAttachment = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!attachForm.label.trim()) return;
+    setAttachBusy(true);
+    try {
+      const res = await fetch(`/api/events/${eventId}/rundown/attachments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(attachForm),
+      });
+      if (res.status === 401) { onUnauthorized(); return; }
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message ?? "Gagal menambah naskah");
+      setAttachments((prev) => [...prev, data]);
+      setAttachForm({ label: "", content: "" });
+      showToast("Naskah ditambahkan.");
+    } catch (err) {
+      showToast((err as Error).message, "err");
+    } finally {
+      setAttachBusy(false);
+    }
+  };
+
+  const openEditAttachment = (attachment: RundownAttachmentRecord) => {
+    if (editingAttachmentId === attachment.id) {
+      setEditingAttachmentId(null);
+      return;
+    }
+    setEditingAttachmentId(attachment.id);
+    setEditAttachForm({ label: attachment.label, content: attachment.content });
+  };
+
+  const handleSaveAttachment = async (attachmentId: string) => {
+    setAttachBusy(true);
+    try {
+      const res = await fetch(`/api/events/${eventId}/rundown/attachments/${attachmentId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(editAttachForm),
+      });
+      if (res.status === 401) { onUnauthorized(); return; }
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message ?? "Gagal menyimpan naskah");
+      setAttachments((prev) => prev.map((a) => (a.id === data.id ? data : a)));
+      setEditingAttachmentId(null);
+      showToast("Naskah disimpan.");
+    } catch (err) {
+      showToast((err as Error).message, "err");
+    } finally {
+      setAttachBusy(false);
+    }
+  };
+
+  const handleDeleteAttachment = async (attachment: RundownAttachmentRecord) => {
+    if (!confirm(`Hapus naskah "${attachment.label}"?`)) return;
+    setAttachBusy(true);
+    try {
+      const res = await fetch(`/api/events/${eventId}/rundown/attachments/${attachment.id}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (res.status === 401) { onUnauthorized(); return; }
+      if (!res.ok) throw new Error("Gagal menghapus naskah");
+      setAttachments((prev) => prev.filter((a) => a.id !== attachment.id));
+      showToast("Naskah dihapus.");
+    } catch (err) {
+      showToast((err as Error).message, "err");
+    } finally {
+      setAttachBusy(false);
+    }
+  };
+
+  const sortedItems = useMemo(() => [...items].sort((a, b) => a.order - b.order), [items]);
+
+  return (
+    <div className="space-y-6">
+      {/* Rundown items */}
+      <div className="rounded-2xl bg-white border border-slate-100 p-5">
+        <div className="flex items-center justify-between gap-3 mb-4">
+          <h3 className="text-sm font-bold text-[#1A1A2E] flex items-center gap-2">
+            <ListOrdered size={16} className="text-[#40916C]" /> Rundown Acara
+          </h3>
+          <div className="flex items-center gap-2">
+            <a
+              href={`/api/events/${eventId}/rundown/export?format=excel`}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:border-slate-300"
+            >
+              Export Excel
+            </a>
+            <a
+              href={`/api/events/${eventId}/rundown/export?format=pdf`}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:border-slate-300"
+            >
+              Export PDF
+            </a>
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              disabled={importBusy}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1B4332] text-white text-xs font-semibold hover:bg-[#40916C] disabled:opacity-50"
+            >
+              {importBusy ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />} Import Excel
+            </button>
+            <input ref={fileRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleImportFile} />
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="flex items-center justify-center py-10">
+            <Loader2 className="animate-spin text-[#40916C]" size={24} />
+          </div>
+        ) : sortedItems.length === 0 ? (
+          <p className="text-sm text-slate-400 text-center py-8">Belum ada item rundown. Tambahkan secara manual atau impor dari Excel.</p>
+        ) : (
+          <div className="divide-y divide-slate-100">
+            {sortedItems.map((item, index) => (
+              <div key={item.id}>
+                <div className="flex items-center gap-3 py-2.5">
+                  <span className="w-5 shrink-0 text-xs font-semibold text-slate-400 text-right">{item.order}</span>
+                  <div className="flex-1 min-w-0 cursor-pointer" onClick={() => openEdit(item)}>
+                    <p className="text-sm font-medium text-[#1A1A2E] truncate">{item.title}</p>
+                    <p className="text-xs text-slate-400">
+                      {item.timeStart && item.timeEnd
+                        ? `${item.timeStart} – ${item.timeEnd}`
+                        : item.timeStart || item.timeEnd || "-"}
+                      {item.durationMinutes != null ? ` • ${item.durationMinutes}'` : ""}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => handleMove(item, "up")}
+                      disabled={index === 0 || actionId === item.id}
+                      title="Pindah ke atas"
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-[#1B4332] hover:bg-slate-50 disabled:opacity-30"
+                    >
+                      <ChevronUp size={14} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleMove(item, "down")}
+                      disabled={index === sortedItems.length - 1 || actionId === item.id}
+                      title="Pindah ke bawah"
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-[#1B4332] hover:bg-slate-50 disabled:opacity-30"
+                    >
+                      <ChevronDown size={14} />
+                    </button>
+                    <ActionBtn onClick={() => openEdit(item)} loading={false} title="Edit" variant="outline" icon={<Pencil size={12} />} />
+                    <ActionBtn onClick={() => handleDelete(item)} loading={actionId === item.id} title="Hapus" variant="danger" icon={<Trash2 size={12} />} />
+                  </div>
+                </div>
+
+                {expandedId === item.id && (
+                  <div className="pb-4 pl-8 pr-2 space-y-3 bg-slate-50/60 rounded-xl">
+                    <div className="grid grid-cols-2 gap-3 pt-3">
+                      <InputField
+                        label="Waktu Mulai"
+                        name="timeStart"
+                        value={editForm.timeStart}
+                        placeholder="17.00"
+                        onChange={(e) => setEditForm((f) => ({ ...f, timeStart: e.target.value }))}
+                      />
+                      <InputField
+                        label="Waktu Selesai"
+                        name="timeEnd"
+                        value={editForm.timeEnd}
+                        placeholder="18.50"
+                        onChange={(e) => setEditForm((f) => ({ ...f, timeEnd: e.target.value }))}
+                      />
+                    </div>
+                    <InputField
+                      label="Judul Rangkaian Acara"
+                      name="title"
+                      value={editForm.title}
+                      onChange={(e) => setEditForm((f) => ({ ...f, title: e.target.value }))}
+                      required
+                    />
+                    <TextAreaField
+                      label="Deskripsi"
+                      value={editForm.description}
+                      onChange={(v) => setEditForm((f) => ({ ...f, description: v }))}
+                    />
+                    <TextAreaField
+                      label="PIC / Koordinator"
+                      value={editForm.pic}
+                      onChange={(v) => setEditForm((f) => ({ ...f, pic: v }))}
+                    />
+                    <TextAreaField
+                      label="Catatan Teknis"
+                      value={editForm.technicalNotes}
+                      onChange={(v) => setEditForm((f) => ({ ...f, technicalNotes: v }))}
+                    />
+                    <InputField
+                      label="Musik / Audio"
+                      name="audioNotes"
+                      value={editForm.audioNotes}
+                      onChange={(e) => setEditForm((f) => ({ ...f, audioNotes: e.target.value }))}
+                    />
+                    <div className="flex items-center gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => handleSaveEdit(item.id)}
+                        disabled={editBusy}
+                        className="px-4 py-1.5 rounded-lg bg-[#1B4332] text-white text-xs font-semibold hover:bg-[#40916C] disabled:opacity-50"
+                      >
+                        {editBusy ? "Menyimpan…" : "Simpan"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setExpandedId(null)}
+                        className="px-4 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:border-slate-300"
+                      >
+                        Batal
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Add form */}
+        <form onSubmit={handleAdd} className="mt-4 pt-4 border-t border-slate-100 grid grid-cols-[100px_100px_1fr_auto] gap-2 items-end">
+          <InputField
+            label="Mulai"
+            name="timeStart"
+            value={addForm.timeStart}
+            placeholder="17.00"
+            onChange={(e) => setAddForm((f) => ({ ...f, timeStart: e.target.value }))}
+          />
+          <InputField
+            label="Selesai"
+            name="timeEnd"
+            value={addForm.timeEnd}
+            placeholder="18.50"
+            onChange={(e) => setAddForm((f) => ({ ...f, timeEnd: e.target.value }))}
+          />
+          <InputField
+            label="Rangkaian Acara"
+            name="title"
+            value={addForm.title}
+            placeholder="Nama segmen acara"
+            onChange={(e) => setAddForm((f) => ({ ...f, title: e.target.value }))}
+            required
+          />
+          <button
+            type="submit"
+            disabled={addBusy || !addForm.title.trim()}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#1B4332] text-white text-xs font-semibold hover:bg-[#40916C] disabled:opacity-50 h-[34px]"
+          >
+            {addBusy ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />} Tambah
+          </button>
+        </form>
+      </div>
+
+      {/* Attachments / naskah */}
+      <div className="rounded-2xl bg-white border border-slate-100 p-5">
+        <h3 className="text-sm font-bold text-[#1A1A2E] flex items-center gap-2 mb-4">
+          <FileText size={16} className="text-[#40916C]" /> Naskah / Lampiran
+        </h3>
+
+        {attachments.length === 0 ? (
+          <p className="text-sm text-slate-400 text-center py-4">Belum ada naskah atau lampiran.</p>
+        ) : (
+          <div className="space-y-2 mb-4">
+            {attachments.map((attachment) => (
+              <div key={attachment.id} className="rounded-xl border border-slate-100">
+                <div className="flex items-center gap-3 px-3 py-2.5">
+                  <FileText size={14} className="text-slate-400 shrink-0" />
+                  <span className="flex-1 text-sm font-medium text-[#1A1A2E] truncate">{attachment.label}</span>
+                  <ActionBtn onClick={() => openEditAttachment(attachment)} loading={false} title="Edit" variant="outline" icon={<Pencil size={12} />} />
+                  <ActionBtn onClick={() => handleDeleteAttachment(attachment)} loading={attachBusy} title="Hapus" variant="danger" icon={<Trash2 size={12} />} />
+                </div>
+                {editingAttachmentId === attachment.id && (
+                  <div className="px-3 pb-3 space-y-2">
+                    <InputField
+                      label="Label"
+                      name="label"
+                      value={editAttachForm.label}
+                      onChange={(e) => setEditAttachForm((f) => ({ ...f, label: e.target.value }))}
+                      required
+                    />
+                    <TextAreaField
+                      label="Isi Naskah"
+                      value={editAttachForm.content}
+                      onChange={(v) => setEditAttachForm((f) => ({ ...f, content: v }))}
+                      rows={6}
+                    />
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleSaveAttachment(attachment.id)}
+                        disabled={attachBusy}
+                        className="px-4 py-1.5 rounded-lg bg-[#1B4332] text-white text-xs font-semibold hover:bg-[#40916C] disabled:opacity-50"
+                      >
+                        Simpan
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditingAttachmentId(null)}
+                        className="px-4 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:border-slate-300"
+                      >
+                        Batal
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        <form onSubmit={handleAddAttachment} className="pt-3 border-t border-slate-100 space-y-2">
+          <InputField
+            label="Label Naskah"
+            name="label"
+            value={attachForm.label}
+            placeholder="Naskah Serah Terima"
+            onChange={(e) => setAttachForm((f) => ({ ...f, label: e.target.value }))}
+            required
+          />
+          <TextAreaField
+            label="Isi Naskah"
+            value={attachForm.content}
+            onChange={(v) => setAttachForm((f) => ({ ...f, content: v }))}
+            rows={4}
+          />
+          <button
+            type="submit"
+            disabled={attachBusy || !attachForm.label.trim()}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#1B4332] text-white text-xs font-semibold hover:bg-[#40916C] disabled:opacity-50"
+          >
+            {attachBusy ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />} Tambah Naskah
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function TextAreaField({
+  label,
+  value,
+  onChange,
+  rows = 3,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  rows?: number;
+}) {
+  return (
+    <label className="flex flex-col gap-1 text-xs">
+      <span className="font-semibold text-slate-600">{label}</span>
+      <textarea
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        rows={rows}
+        className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-[#1A1A2E] placeholder:text-slate-400 focus:border-[#1B4332] focus:outline-none resize-y"
+      />
+    </label>
   );
 }

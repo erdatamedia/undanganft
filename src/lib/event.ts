@@ -197,6 +197,54 @@ async function ensureEventSchemaInternal() {
   await query(`alter table attendees alter column event_id set not null`);
   await query(`create index if not exists idx_attendees_event_id on attendees(event_id)`);
   await query(`create index if not exists idx_attendees_token on attendees(token)`);
+
+  // Rundown acara
+  await query(`
+    create table if not exists rundown_items (
+      id uuid primary key default uuid_generate_v4(),
+      event_id uuid not null references events(id) on delete cascade,
+      item_order int not null,
+      time_start text,
+      time_end text,
+      duration_minutes int,
+      title text not null,
+      description text,
+      pic text,
+      technical_notes text,
+      audio_notes text,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
+    )
+  `);
+  await query(`create index if not exists idx_rundown_items_event_id on rundown_items(event_id, item_order)`);
+
+  await query(`
+    create or replace function set_rundown_items_updated_at()
+    returns trigger as $$
+    begin
+      new.updated_at = now();
+      return new;
+    end;
+    $$ language plpgsql
+  `);
+  await query(`drop trigger if exists trg_rundown_items_updated on rundown_items`);
+  await query(`
+    create trigger trg_rundown_items_updated
+    before update on rundown_items
+    for each row execute procedure set_rundown_items_updated_at()
+  `);
+
+  await query(`
+    create table if not exists rundown_attachments (
+      id uuid primary key default uuid_generate_v4(),
+      event_id uuid not null references events(id) on delete cascade,
+      label text not null,
+      content text not null,
+      item_order int not null default 0,
+      created_at timestamptz not null default now()
+    )
+  `);
+  await query(`create index if not exists idx_rundown_attachments_event_id on rundown_attachments(event_id, item_order)`);
 }
 
 export async function ensureEventSchema() {
