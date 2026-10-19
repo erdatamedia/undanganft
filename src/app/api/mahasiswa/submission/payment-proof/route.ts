@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getMahasiswaFromSession } from "@/lib/mahasiswa-auth";
 import {
-  findActiveEligibleEvent,
+  findActiveEvent,
   getOrCreateSubmission,
   notifyAllWd2,
   uploadPaymentProof,
@@ -17,8 +17,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
   }
 
-  const eligible = await findActiveEligibleEvent(mhs.npm);
-  if (!eligible) {
+  const active = await findActiveEvent();
+  if (!active) {
     return NextResponse.json({ message: "Tidak ada acara aktif." }, { status: 404 });
   }
 
@@ -39,7 +39,7 @@ export async function POST(request: Request) {
   const base64 = buffer.toString("base64");
   const dataUri = `data:${mimeType};base64,${base64}`;
 
-  const submission = await getOrCreateSubmission(eligible.eventId, mhs.id);
+  const submission = await getOrCreateSubmission(active.eventId, mhs.id);
   const updated = await uploadPaymentProof(submission.id, dataUri);
 
   await notifyAllWd2({

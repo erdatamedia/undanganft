@@ -3,10 +3,9 @@ import { redirect } from "next/navigation";
 import bcrypt from "bcryptjs";
 import {
   createMahasiswa,
-  findActiveEligibleEvent,
+  findActiveEvent,
   findMahasiswaByNpm,
   getMahasiswaById,
-  normalizeName,
   normalizeNpm,
   setMahasiswaPasswordHash,
   type MahasiswaRecord,
@@ -51,12 +50,9 @@ export async function registerMahasiswa(payload: {
     throw new Error("Nama, NPM, dan email wajib diisi.");
   }
 
-  const eligible = await findActiveEligibleEvent(npm);
-  if (!eligible) {
-    throw new Error("NPM tidak ditemukan pada daftar mahasiswa yang eligible untuk acara aktif saat ini.");
-  }
-  if (normalizeName(eligible.name) !== normalizeName(name)) {
-    throw new Error("Nama tidak sesuai dengan data terdaftar. Periksa kembali ejaan nama Anda.");
+  const active = await findActiveEvent();
+  if (!active) {
+    throw new Error("Tidak ada acara aktif untuk pendaftaran saat ini.");
   }
 
   const existing = await findMahasiswaByNpm(npm);
@@ -70,7 +66,7 @@ export async function registerMahasiswa(payload: {
   const passwordHash = await bcrypt.hash(password, 10);
   const mahasiswa = await createMahasiswa({ npm, name, email, passwordHash });
 
-  return { mahasiswa, password, eventId: eligible.eventId };
+  return { mahasiswa, password, eventId: active.eventId };
 }
 
 export async function signInMahasiswa(npm: string, password: string): Promise<MahasiswaRecord> {

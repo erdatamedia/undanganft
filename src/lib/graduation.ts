@@ -323,6 +323,15 @@ export async function findActiveEligibleEvent(
   return rows[0] ? mapEligible(rows[0]) : null;
 }
 
+/** Most recently created ACTIVE event — no eligible-list check. */
+export async function findActiveEvent(): Promise<{ eventId: string } | null> {
+  await ensureGraduationSchema();
+  const rows = await query<{ id: string }>(
+    "select id from events where status='ACTIVE' order by created_at desc limit 1"
+  );
+  return rows[0] ? { eventId: rows[0].id } : null;
+}
+
 export async function importEligible(
   eventId: string,
   rows: { npm: string; name: string; program?: string | null }[]
