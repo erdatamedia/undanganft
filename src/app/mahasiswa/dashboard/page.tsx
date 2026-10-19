@@ -13,6 +13,7 @@ import {
   X,
   XCircle,
 } from "lucide-react";
+import { InstallPrompt } from "@/components/install-prompt";
 
 type Submission = {
   id: string;
@@ -230,6 +231,8 @@ export default function MahasiswaDashboardPage() {
           </button>
         </div>
       </div>
+
+      <InstallPrompt />
 
       {toast && (
         <div className={`rounded-xl border px-4 py-3 text-sm ${

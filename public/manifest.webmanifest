@@ -1,0 +1,14 @@
+{
+  "name": "Yudisium & Wisuda FT UNISMA",
+  "short_name": "Yudisium FT",
+  "description": "Cek status konfirmasi yudisium & wisuda pelepasan Fakultas Teknik UNISMA",
+  "start_url": "/mahasiswa/dashboard",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#F8FAF9",
+  "theme_color": "#1B4332",
+  "icons": [
+    { "src": "/pwa-icon-192", "sizes": "192x192", "type": "image/png" },
+    { "src": "/pwa-icon-512", "sizes": "512x512", "type": "image/png" }
+  ]
+}
