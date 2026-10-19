@@ -37,6 +37,10 @@ export async function POST(req: Request) {
     bannerUrl: payload.bannerUrl,
     status: payload.status ?? "ACTIVE",
     linkPrefix: payload.linkPrefix,
+    yudisiumSchedule: payload.yudisiumSchedule,
+    yudisiumVenue: payload.yudisiumVenue,
+    yudisiumDresscode: payload.yudisiumDresscode,
+    wisudaDresscode: payload.wisudaDresscode,
   });
 
   return NextResponse.json(event, { status: 201 });

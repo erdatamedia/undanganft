@@ -883,7 +883,12 @@ function EventSettingsInline({
   const [form, setForm] = useState<Partial<EventData>>({});
 
   useEffect(() => {
-    if (event) setForm({ name: event.name, description: event.description ?? "", date: event.date, time: event.time, timeEnd: event.timeEnd ?? "", venue: event.venue, gate: event.gate, status: event.status });
+    if (event) setForm({
+      name: event.name, description: event.description ?? "", date: event.date, time: event.time,
+      timeEnd: event.timeEnd ?? "", venue: event.venue, gate: event.gate, status: event.status,
+      yudisiumSchedule: event.yudisiumSchedule ?? "", yudisiumVenue: event.yudisiumVenue ?? "",
+      yudisiumDresscode: event.yudisiumDresscode ?? "", wisudaDresscode: event.wisudaDresscode ?? "",
+    });
   }, [event]);
 
   const handleSave = async () => {
@@ -894,7 +899,12 @@ function EventSettingsInline({
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ name: form.name, description: form.description, date: form.date, time: form.time, timeEnd: form.timeEnd, venue: form.venue, gate: form.gate, status: form.status }),
+        body: JSON.stringify({
+          name: form.name, description: form.description, date: form.date, time: form.time,
+          timeEnd: form.timeEnd, venue: form.venue, gate: form.gate, status: form.status,
+          yudisiumSchedule: form.yudisiumSchedule, yudisiumVenue: form.yudisiumVenue,
+          yudisiumDresscode: form.yudisiumDresscode, wisudaDresscode: form.wisudaDresscode,
+        }),
       });
       if (res.status === 401) { onUnauthorized(); return; }
       const data = await res.json();
@@ -918,6 +928,8 @@ function EventSettingsInline({
         <EventRow label="Tanggal" value={event.date} />
         <EventRow label="Waktu" value={`${event.time}${event.timeEnd ? ` – ${event.timeEnd}` : ""}`} />
         <EventRow label="Lokasi" value={event.venue} />
+        {event.yudisiumSchedule && <EventRow label="Jadwal Yudisium" value={event.yudisiumSchedule} />}
+        {event.yudisiumVenue && <EventRow label="Lokasi Yudisium" value={event.yudisiumVenue} />}
         <button
           type="button"
           onClick={() => setOpen(true)}
@@ -940,6 +952,13 @@ function EventSettingsInline({
       <InputField label="Waktu selesai" name="timeEnd" value={form.timeEnd ?? ""} onChange={sf("timeEnd")} />
       <InputField label="Lokasi" name="venue" value={form.venue ?? ""} onChange={sf("venue")} />
       <InputField label="Info registrasi" name="gate" value={form.gate ?? ""} onChange={sf("gate")} />
+      <div className="pt-2 border-t border-slate-100 space-y-3">
+        <p className="text-xs font-bold uppercase tracking-widest text-[#40916C]">Yudisium &amp; Wisuda</p>
+        <InputField label="Jadwal Yudisium" name="yudisiumSchedule" value={form.yudisiumSchedule ?? ""} onChange={sf("yudisiumSchedule")} placeholder="cth. Jumat, 07.30 WIB" />
+        <InputField label="Lokasi Yudisium" name="yudisiumVenue" value={form.yudisiumVenue ?? ""} onChange={sf("yudisiumVenue")} placeholder="cth. Gedung B Lantai 7" />
+        <InputField label="Dresscode Yudisium" name="yudisiumDresscode" value={form.yudisiumDresscode ?? ""} onChange={sf("yudisiumDresscode")} placeholder="cth. Hitam putih, almamater" />
+        <InputField label="Dresscode Wisuda Pelepasan" name="wisudaDresscode" value={form.wisudaDresscode ?? ""} onChange={sf("wisudaDresscode")} placeholder="cth. Batik dan kebaya" />
+      </div>
       <label className="flex flex-col gap-1 text-xs">
         <span className="font-semibold text-slate-600">Status</span>
         <select value={form.status ?? "ACTIVE"} onChange={sf("status")}

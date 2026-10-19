@@ -18,6 +18,10 @@ type EventRow = {
   banner_url: string | null;
   status: EventStatus;
   link_prefix: string;
+  yudisium_schedule: string | null;
+  yudisium_venue: string | null;
+  yudisium_dresscode: string | null;
+  wisuda_dresscode: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -35,6 +39,10 @@ export type EventRecord = {
   bannerUrl?: string | null;
   status: EventStatus;
   linkPrefix: string;
+  yudisiumSchedule?: string | null;
+  yudisiumVenue?: string | null;
+  yudisiumDresscode?: string | null;
+  wisudaDresscode?: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -50,6 +58,10 @@ export type EventPayload = {
   bannerUrl?: string;
   status?: EventStatus;
   linkPrefix?: string;
+  yudisiumSchedule?: string;
+  yudisiumVenue?: string;
+  yudisiumDresscode?: string;
+  wisudaDresscode?: string;
 };
 
 const defaultEventPayload: EventPayload = {
@@ -82,6 +94,10 @@ async function ensureEventSchemaInternal() {
   await query(`alter table events add column if not exists description text`);
   await query(`alter table events add column if not exists time_end text`);
   await query(`alter table events add column if not exists banner_url text`);
+  await query(`alter table events add column if not exists yudisium_schedule text`);
+  await query(`alter table events add column if not exists yudisium_venue text`);
+  await query(`alter table events add column if not exists yudisium_dresscode text`);
+  await query(`alter table events add column if not exists wisuda_dresscode text`);
   await query(`alter table events add column if not exists status text not null default 'ACTIVE'`);
   await query(`
     do $$ begin
@@ -272,6 +288,10 @@ const mapEvent = (row: EventRow): EventRecord => ({
   bannerUrl: row.banner_url,
   status: row.status ?? "ACTIVE",
   linkPrefix: row.link_prefix || DEFAULT_LINK_PREFIX,
+  yudisiumSchedule: row.yudisium_schedule,
+  yudisiumVenue: row.yudisium_venue,
+  yudisiumDresscode: row.yudisium_dresscode,
+  wisudaDresscode: row.wisuda_dresscode,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });
@@ -300,8 +320,9 @@ export async function getEvent(id: string): Promise<EventRecord | null> {
 export async function createEvent(payload: EventPayload): Promise<EventRecord> {
   await ensureEventSchema();
   const rows = await query<EventRow>(
-    `insert into events (name, description, date, time, time_end, venue, gate, banner_url, status, link_prefix)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+    `insert into events (name, description, date, time, time_end, venue, gate, banner_url, status, link_prefix,
+       yudisium_schedule, yudisium_venue, yudisium_dresscode, wisuda_dresscode)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
      returning *`,
     [
       payload.name,
@@ -314,6 +335,10 @@ export async function createEvent(payload: EventPayload): Promise<EventRecord> {
       payload.bannerUrl ?? null,
       payload.status ?? "ACTIVE",
       payload.linkPrefix || DEFAULT_LINK_PREFIX,
+      payload.yudisiumSchedule ?? null,
+      payload.yudisiumVenue ?? null,
+      payload.yudisiumDresscode ?? null,
+      payload.wisudaDresscode ?? null,
     ]
   );
   return mapEvent(rows[0]);
@@ -330,8 +355,10 @@ export async function updateEvent(
   const rows = await query<EventRow>(
     `update events
      set name=$1, description=$2, date=$3, time=$4, time_end=$5,
-         venue=$6, gate=$7, banner_url=$8, status=$9, link_prefix=$10, updated_at=now()
-     where id=$11
+         venue=$6, gate=$7, banner_url=$8, status=$9, link_prefix=$10,
+         yudisium_schedule=$11, yudisium_venue=$12, yudisium_dresscode=$13, wisuda_dresscode=$14,
+         updated_at=now()
+     where id=$15
      returning *`,
     [
       payload.name ?? current.name,
@@ -344,6 +371,10 @@ export async function updateEvent(
       payload.bannerUrl !== undefined ? payload.bannerUrl : current.bannerUrl,
       payload.status ?? current.status,
       payload.linkPrefix ?? current.linkPrefix,
+      payload.yudisiumSchedule !== undefined ? payload.yudisiumSchedule : current.yudisiumSchedule,
+      payload.yudisiumVenue !== undefined ? payload.yudisiumVenue : current.yudisiumVenue,
+      payload.yudisiumDresscode !== undefined ? payload.yudisiumDresscode : current.yudisiumDresscode,
+      payload.wisudaDresscode !== undefined ? payload.wisudaDresscode : current.wisudaDresscode,
       id,
     ]
   );

@@ -1,8 +1,26 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { GraduationCap, Loader2, Copy, CheckCircle2 } from "lucide-react";
+
+type EventInfo = {
+  name: string;
+  schedule: string;
+  venue: string;
+  yudisiumSchedule: string | null;
+  yudisiumVenue: string | null;
+  yudisiumDresscode: string | null;
+  wisudaDresscode: string | null;
+};
+
+type RundownInfo = {
+  order: number;
+  timeStart: string | null;
+  timeEnd: string | null;
+  durationMinutes: number | null;
+  title: string;
+};
 
 export default function DaftarMahasiswaPage() {
   const [form, setForm] = useState({ name: "", npm: "", email: "" });
@@ -10,6 +28,19 @@ export default function DaftarMahasiswaPage() {
   const [error, setError] = useState<string | null>(null);
   const [password, setPassword] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+
+  const [eventInfo, setEventInfo] = useState<EventInfo | null>(null);
+  const [rundown, setRundown] = useState<RundownInfo[]>([]);
+
+  useEffect(() => {
+    fetch("/api/mahasiswa/active-event-info")
+      .then((res) => res.json())
+      .then((data) => {
+        setEventInfo(data.event);
+        setRundown(data.rundown ?? []);
+      })
+      .catch(() => {});
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -74,8 +105,46 @@ export default function DaftarMahasiswaPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#F8FAF9] flex items-center justify-center px-5 py-10">
-      <div className="w-full max-w-sm rounded-3xl bg-white border border-slate-100 p-6 shadow-sm">
+    <div className="min-h-screen bg-[#F8FAF9] px-5 py-10">
+      <div className="w-full max-w-sm mx-auto space-y-4">
+        {eventInfo && (
+          <div className="rounded-3xl bg-white border border-slate-100 p-6 shadow-sm">
+            <p className="text-xs font-bold uppercase tracking-[2px] text-[#40916C] mb-1">Acara</p>
+            <h2 className="text-base font-bold text-[#1A1A2E] mb-3">{eventInfo.name}</h2>
+
+            {(eventInfo.yudisiumSchedule || eventInfo.yudisiumVenue || eventInfo.yudisiumDresscode) && (
+              <div className="mb-3 pb-3 border-b border-slate-100">
+                <p className="text-xs font-semibold text-[#1B4332] mb-1">Yudisium</p>
+                {eventInfo.yudisiumSchedule && <p className="text-sm text-slate-600">🗓️ {eventInfo.yudisiumSchedule}</p>}
+                {eventInfo.yudisiumVenue && <p className="text-sm text-slate-600">📍 {eventInfo.yudisiumVenue}</p>}
+                {eventInfo.yudisiumDresscode && <p className="text-xs text-slate-400">👔 {eventInfo.yudisiumDresscode}</p>}
+              </div>
+            )}
+
+            <div>
+              <p className="text-xs font-semibold text-[#1B4332] mb-1">Wisuda Pelepasan</p>
+              <p className="text-sm text-slate-600">🗓️ {eventInfo.schedule}</p>
+              <p className="text-sm text-slate-600">📍 {eventInfo.venue}</p>
+              {eventInfo.wisudaDresscode && <p className="text-xs text-slate-400">👔 {eventInfo.wisudaDresscode}</p>}
+            </div>
+
+            {rundown.length > 0 && (
+              <details className="mt-3 pt-3 border-t border-slate-100">
+                <summary className="text-xs font-semibold text-[#40916C] cursor-pointer">Lihat Susunan Acara</summary>
+                <div className="mt-2 space-y-1.5">
+                  {rundown.map((item) => (
+                    <div key={item.order} className="flex gap-2 text-xs">
+                      <span className="shrink-0 font-semibold text-[#1B4332] w-12">{item.timeStart ?? "-"}</span>
+                      <span className="text-slate-600">{item.title}</span>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
+          </div>
+        )}
+
+      <div className="w-full rounded-3xl bg-white border border-slate-100 p-6 shadow-sm">
         <div className="text-center mb-6">
           <GraduationCap className="mx-auto text-[#1B4332] mb-2" size={36} />
           <h1 className="text-lg font-bold text-[#1A1A2E]">Pendaftaran Mahasiswa</h1>
@@ -123,6 +192,7 @@ export default function DaftarMahasiswaPage() {
             Masuk di sini
           </Link>
         </p>
+      </div>
       </div>
     </div>
   );

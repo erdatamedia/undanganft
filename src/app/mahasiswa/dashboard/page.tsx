@@ -25,6 +25,10 @@ type EventData = {
   name: string;
   schedule: string;
   venue: string;
+  yudisiumSchedule?: string | null;
+  yudisiumVenue?: string | null;
+  yudisiumDresscode?: string | null;
+  wisudaDresscode?: string | null;
 };
 
 type Notification = {
@@ -219,16 +223,24 @@ export default function MahasiswaDashboardPage() {
         <div className="rounded-2xl bg-white border border-slate-100 p-5 shadow-sm">
           <p className="text-xs font-bold uppercase tracking-[2px] text-[#40916C] mb-2">Acara</p>
           <h2 className="text-base font-bold text-[#1A1A2E]">{event.name}</h2>
-          <p className="text-sm text-slate-500 mt-1">{event.schedule}</p>
-          <p className="text-sm text-slate-500">{event.venue}</p>
         </div>
       )}
 
-      {/* Yudisium */}
+      {/* Yudisium — undangan selalu tampil begitu eligible */}
       <div className="rounded-2xl bg-white border border-slate-100 p-5 shadow-sm">
         <p className="text-xs font-bold uppercase tracking-[2px] text-[#40916C] mb-3">
-          Tahap 1 — Konfirmasi Yudisium
+          Undangan Yudisium
         </p>
+        <div className="space-y-1.5 text-sm text-[#1A1A2E] mb-4">
+          {event?.yudisiumSchedule && <p>🗓️ {event.yudisiumSchedule}</p>}
+          {event?.yudisiumVenue && <p>📍 {event.yudisiumVenue}</p>}
+          {event?.yudisiumDresscode && (
+            <p className="text-slate-500">👔 Dresscode: {event.yudisiumDresscode}</p>
+          )}
+          {!event?.yudisiumSchedule && !event?.yudisiumVenue && (
+            <p className="text-slate-400">Informasi jadwal yudisium akan diumumkan panitia.</p>
+          )}
+        </div>
         {submission?.yudisiumConfirmed ? (
           <div className="flex items-center gap-2 text-emerald-600">
             <CheckCircle2 size={18} />
@@ -245,11 +257,18 @@ export default function MahasiswaDashboardPage() {
         )}
       </div>
 
-      {/* Payment */}
+      {/* Wisuda Pelepasan — tampil, tapi terkunci sampai WD2 ACC */}
       <div className="rounded-2xl bg-white border border-slate-100 p-5 shadow-sm">
         <p className="text-xs font-bold uppercase tracking-[2px] text-[#40916C] mb-3">
-          Tahap 2 — Bukti Pembayaran Wisuda
+          Undangan Wisuda Pelepasan
         </p>
+        <div className="space-y-1.5 text-sm text-[#1A1A2E] mb-4">
+          {event?.schedule && <p>🗓️ {event.schedule}</p>}
+          {event?.venue && <p>📍 {event.venue}</p>}
+          {event?.wisudaDresscode && (
+            <p className="text-slate-500">👔 Dresscode: {event.wisudaDresscode}</p>
+          )}
+        </div>
 
         {submission?.paymentStatus === "approved" ? (
           <div className="flex items-center gap-2 text-emerald-600">
@@ -260,9 +279,9 @@ export default function MahasiswaDashboardPage() {
             </span>
           </div>
         ) : submission?.paymentStatus === "pending" ? (
-          <div className="flex items-center gap-2 text-amber-600">
-            <Clock size={18} />
-            <span className="text-sm font-semibold">Menunggu review dari WD2…</span>
+          <div className="flex items-center gap-2 text-amber-600 bg-amber-50 rounded-xl px-3 py-2.5">
+            <Clock size={18} className="shrink-0" />
+            <span className="text-sm font-semibold">Menunggu ACC WD2 terkait pembayaran…</span>
           </div>
         ) : (
           <div className="space-y-3">
@@ -273,6 +292,11 @@ export default function MahasiswaDashboardPage() {
                   Ditolak: {submission.paymentRejectReason}. Silakan unggah ulang bukti yang valid.
                 </span>
               </div>
+            )}
+            {submission?.paymentStatus === "none" && (
+              <p className="text-xs text-slate-400">
+                Unggah bukti pembayaran wisuda — undangan baru terkirim setelah disetujui WD2.
+              </p>
             )}
             <button
               onClick={() => fileRef.current?.click()}

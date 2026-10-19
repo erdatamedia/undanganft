@@ -18,6 +18,10 @@ export default function NewEventPage() {
     venue: "",
     gate: "",
     status: "ACTIVE",
+    yudisiumSchedule: "",
+    yudisiumVenue: "",
+    yudisiumDresscode: "",
+    wisudaDresscode: "",
   });
 
   const set = (key: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
@@ -41,6 +45,10 @@ export default function NewEventPage() {
           venue: form.venue.trim(),
           gate: form.gate.trim(),
           status: form.status,
+          yudisiumSchedule: form.yudisiumSchedule.trim() || undefined,
+          yudisiumVenue: form.yudisiumVenue.trim() || undefined,
+          yudisiumDresscode: form.yudisiumDresscode.trim() || undefined,
+          wisudaDresscode: form.wisudaDresscode.trim() || undefined,
         }),
       });
 
@@ -161,6 +169,51 @@ export default function NewEventPage() {
             className={inputCls}
           />
         </Field>
+
+        <div className="pt-2 border-t border-slate-100">
+          <p className="text-xs font-bold uppercase tracking-widest text-[#40916C] mb-3">
+            Yudisium &amp; Wisuda Pelepasan (opsional)
+          </p>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Jadwal Yudisium">
+                <input
+                  placeholder="cth. Jumat, 07.30 WIB"
+                  value={form.yudisiumSchedule}
+                  onChange={set("yudisiumSchedule")}
+                  className={inputCls}
+                />
+              </Field>
+              <Field label="Lokasi Yudisium">
+                <input
+                  placeholder="cth. Gedung B Lantai 7 UNISMA"
+                  value={form.yudisiumVenue}
+                  onChange={set("yudisiumVenue")}
+                  className={inputCls}
+                />
+              </Field>
+            </div>
+            <Field label="Dresscode Yudisium">
+              <input
+                placeholder="cth. Hitam putih, almamater"
+                value={form.yudisiumDresscode}
+                onChange={set("yudisiumDresscode")}
+                className={inputCls}
+              />
+            </Field>
+            <Field label="Dresscode Wisuda Pelepasan">
+              <input
+                placeholder="cth. Batik dan kebaya"
+                value={form.wisudaDresscode}
+                onChange={set("wisudaDresscode")}
+                className={inputCls}
+              />
+            </Field>
+            <p className="text-xs text-slate-400">
+              Lokasi &amp; jadwal wisuda pelepasan memakai field Tanggal/Waktu/Lokasi di atas.
+            </p>
+          </div>
+        </div>
 
         <div className="flex items-center gap-3 pt-2">
           <button
