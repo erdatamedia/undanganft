@@ -66,6 +66,7 @@ export default function MahasiswaDashboardPage() {
 
   const [rundown, setRundown] = useState<RundownInfo[]>([]);
   const [showRundown, setShowRundown] = useState(false);
+  const [inviteToken, setInviteToken] = useState<string | null>(null);
 
   const fileRef = useRef<HTMLInputElement | null>(null);
 
@@ -88,6 +89,7 @@ export default function MahasiswaDashboardPage() {
     setEvent(data.event);
     setSubmission(data.submission);
     setMahasiswa(data.mahasiswa);
+    setInviteToken(data.inviteToken ?? null);
   }, [router]);
 
   const fetchNotifications = useCallback(async () => {
@@ -303,12 +305,19 @@ export default function MahasiswaDashboardPage() {
         </div>
 
         {submission?.paymentStatus === "approved" ? (
-          <div className="flex items-center gap-2 text-emerald-600">
-            <CheckCircle2 size={18} />
-            <span className="text-sm font-semibold">
-              Disetujui — undangan wisuda {" "}
-              {submission.wisudaConfirmed ? "sudah dikirim ke email Anda." : "sedang diproses."}
-            </span>
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 text-emerald-600">
+              <CheckCircle2 size={18} />
+              <span className="text-sm font-semibold">Disetujui — undangan wisuda Anda sudah siap.</span>
+            </div>
+            {inviteToken && (
+              <a
+                href={`/invite/${encodeURIComponent(inviteToken)}`}
+                className="block w-full text-center rounded-xl bg-[#1B4332] text-white text-sm font-semibold py-3 hover:bg-[#40916C] transition-colors"
+              >
+                Lihat Undangan & QR Kehadiran
+              </a>
+            )}
           </div>
         ) : submission?.paymentStatus === "pending" ? (
           <div className="flex items-center gap-2 text-amber-600 bg-amber-50 rounded-xl px-3 py-2.5">

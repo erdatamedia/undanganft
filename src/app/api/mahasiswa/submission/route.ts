@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getMahasiswaFromSession } from "@/lib/mahasiswa-auth";
 import { findActiveEvent, getOrCreateSubmission } from "@/lib/graduation";
 import { getEvent } from "@/lib/event";
+import { getAttendee } from "@/lib/storage";
 
 export async function GET() {
   const mhs = await getMahasiswaFromSession();
@@ -22,5 +23,12 @@ export async function GET() {
     getOrCreateSubmission(active.eventId, mhs.id),
   ]);
 
-  return NextResponse.json({ event, submission, mahasiswa: mhs });
+  const attendee = submission.attendeeId ? await getAttendee(submission.attendeeId) : null;
+
+  return NextResponse.json({
+    event,
+    submission,
+    mahasiswa: mhs,
+    inviteToken: attendee?.token ?? null,
+  });
 }

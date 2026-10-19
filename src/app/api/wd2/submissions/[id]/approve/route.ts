@@ -8,8 +8,7 @@ import {
   markSubmissionApproved,
 } from "@/lib/graduation";
 import { getEvent } from "@/lib/event";
-import { addAttendee, updateAttendee } from "@/lib/storage";
-import { isEmailConfigured, sendInvitationEmail } from "@/lib/email";
+import { addAttendee } from "@/lib/storage";
 
 export async function POST(
   _req: NextRequest,
@@ -42,7 +41,7 @@ export async function POST(
 
   const eligible = await findEligible(submission.eventId, mahasiswa.npm);
 
-  let attendee = await addAttendee(
+  const attendee = await addAttendee(
     {
       name: mahasiswa.name,
       program: eligible?.program || "Belum ditentukan",
@@ -54,32 +53,15 @@ export async function POST(
     submission.eventId
   );
 
-  let emailNote = "Panitia akan mengirim undangan secara manual.";
-  if (isEmailConfigured() && attendee.email) {
-    try {
-      await sendInvitationEmail(attendee, event);
-      const updated = await updateAttendee(attendee.id, (current) => ({
-        ...current,
-        emailSent: true,
-        sentAt: new Date().toISOString(),
-        status: "sent",
-      }));
-      if (updated) attendee = updated;
-      emailNote = "Undangan telah dikirim via email.";
-    } catch {
-      emailNote = "Undangan belum terkirim otomatis — panitia perlu mengirim manual.";
-    }
-  }
-
   await markSubmissionApproved(submission.id, wd2.id, attendee.id);
   await createNotification({
     recipientType: "mahasiswa",
     recipientId: mahasiswa.id,
     type: "payment_approved",
     title: "Bukti pembayaran disetujui",
-    body: `Pembayaran wisuda Anda telah disetujui. ${emailNote}`,
+    body: "Pembayaran wisuda Anda telah disetujui. Undangan sudah tersedia di dashboard Anda.",
     link: "/mahasiswa/dashboard",
   });
 
-  return NextResponse.json({ status: "approved", attendee, emailNote });
+  return NextResponse.json({ status: "approved", attendee });
 }
