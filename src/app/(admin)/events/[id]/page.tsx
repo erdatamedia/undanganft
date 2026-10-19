@@ -17,6 +17,7 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronUp,
+  GraduationCap,
   Loader2,
   ListOrdered,
   Pencil,
@@ -126,12 +127,20 @@ export default function EventDetailPage() {
               <p className="text-sm text-slate-500 mt-1">{currentEvent.schedule} • {currentEvent.venue}</p>
             )}
           </div>
-          <Link
-            href={`/events/${eventId}/scan`}
-            className="shrink-0 inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#1B4332] text-white text-sm font-semibold hover:bg-[#40916C] transition-colors"
-          >
-            <QrCode size={15} /> Scan QR
-          </Link>
+          <div className="flex items-center gap-2 shrink-0">
+            <Link
+              href={`/events/${eventId}/yudisium`}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-slate-200 text-slate-600 text-sm font-semibold hover:border-slate-300 transition-colors"
+            >
+              <GraduationCap size={15} /> Yudisium & Wisuda
+            </Link>
+            <Link
+              href={`/events/${eventId}/scan`}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#1B4332] text-white text-sm font-semibold hover:bg-[#40916C] transition-colors"
+            >
+              <QrCode size={15} /> Scan QR
+            </Link>
+          </div>
         </div>
       </div>
 
