@@ -7,11 +7,14 @@ import {
   findMahasiswaByNpm,
   getMahasiswaById,
   normalizeNpm,
+  setMahasiswaEmail,
   setMahasiswaPasswordHash,
   type MahasiswaRecord,
 } from "@/lib/graduation";
 
 const SESSION_COOKIE = "mahasiswa_session";
+
+const squash = (v: string) => v.toLowerCase().replace(/[^a-z0-9]+/g, "");
 
 function generatePassword(): string {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
@@ -57,9 +60,24 @@ export async function registerMahasiswa(payload: {
 
   const existing = await findMahasiswaByNpm(npm);
   if (existing) {
-    throw new Error(
-      "NPM ini sudah terdaftar. Jika lupa password, silakan hubungi panitia untuk reset."
-    );
+    // Akun dibuat panitia di meja (belum pernah diklaim, email kosong) atau pemilik lupa password:
+    // boleh diklaim ulang bila nama cocok dan (email kosong ATAU email sama dengan yang terdaftar).
+    const sameName = squash(existing.name) === squash(name);
+    const existingEmail = (existing.email ?? "").trim().toLowerCase();
+    const claimable = sameName && (!existingEmail || existingEmail === email.toLowerCase());
+    if (!claimable) {
+      throw new Error(
+        sameName
+          ? "NPM ini sudah terdaftar dengan email berbeda. Gunakan email yang dipakai saat mendaftar, atau hubungi panitia untuk reset."
+          : "NPM ini sudah terdaftar dengan nama berbeda. Periksa kembali nama Anda atau hubungi panitia."
+      );
+    }
+    const password = generatePassword();
+    await setMahasiswaPasswordHash(existing.id, await bcrypt.hash(password, 10));
+    if (!existingEmail) await setMahasiswaEmail(existing.id, email);
+    const mahasiswa = await getMahasiswaById(existing.id);
+    if (!mahasiswa) throw new Error("Akun tidak ditemukan.");
+    return { mahasiswa, password, eventId: active.eventId };
   }
 
   const password = generatePassword();

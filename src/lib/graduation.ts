@@ -1200,3 +1200,8 @@ export async function listMahasiswaWithoutSubmission(eventId: string): Promise<s
   );
   return rows.map((r) => r.id);
 }
+
+export async function setMahasiswaEmail(id: string, email: string): Promise<void> {
+  await ensureGraduationSchema();
+  await query("update mahasiswa set email=$2 where id=$1", [id, email]);
+}

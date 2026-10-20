@@ -88,7 +88,7 @@ export default function DaftarMahasiswaPage() {
             </button>
           </div>
           <p className="text-xs text-amber-700 mt-3">
-            Lupa password? Hubungi panitia untuk direset — pendaftaran ulang dengan NPM yang sama tidak diperbolehkan.
+            Lupa password? Daftar ulang dengan NPM, nama, dan email yang sama untuk mendapat password baru, atau hubungi panitia.
           </p>
           <Link href="/mahasiswa/login" className="glass-btn glass-btn-primary mt-5 w-full flex items-center justify-center">
             Masuk Sekarang
