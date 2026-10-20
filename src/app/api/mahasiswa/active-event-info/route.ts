@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { ensureEventSchema, type EventStatus } from "@/lib/event";
 import { listRundownItems } from "@/lib/rundown";
+import { listEventDocuments } from "@/lib/graduation";
 
 export async function GET() {
   await ensureEventSchema();
@@ -40,6 +41,7 @@ export async function GET() {
   }
 
   const rundownItems = await listRundownItems(eventId);
+  const documents = await listEventDocuments(eventId);
   const publicRundown = rundownItems.map((item) => ({
     order: item.order,
     timeStart: item.timeStart,
@@ -61,5 +63,9 @@ export async function GET() {
       univVenue: row.univ_venue,
     },
     rundown: publicRundown,
+    attachments: {
+      yudisium: documents.some((d) => d.kind === "yudisium"),
+      wisuda: documents.some((d) => d.kind === "wisuda"),
+    },
   });
 }

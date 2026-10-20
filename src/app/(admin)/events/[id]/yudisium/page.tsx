@@ -3,10 +3,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Loader2, Plus, ShieldCheck, Trash2, Upload, Users } from "lucide-react";
+import { ArrowLeft, FileText, Loader2, Plus, ShieldCheck, Trash2, Upload, Users } from "lucide-react";
 
 type Eligible = { id: string; npm: string; name: string; program: string | null };
 type Wd2Account = { id: string; email: string };
+type Doc = { kind: "yudisium" | "wisuda"; filename: string; size: number; updatedAt: string };
+
+const DOC_KINDS: { kind: Doc["kind"]; label: string }[] = [
+  { kind: "yudisium", label: "Undangan Yudisium" },
+  { kind: "wisuda", label: "Undangan Wisuda Fakultas" },
+];
 
 export default function YudisiumAdminPage() {
   const { id: eventId } = useParams<{ id: string }>();
@@ -20,6 +26,9 @@ export default function YudisiumAdminPage() {
   const [addBusy, setAddBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [importBusy, setImportBusy] = useState(false);
+
+  const [docs, setDocs] = useState<Doc[]>([]);
+  const [docBusy, setDocBusy] = useState<string | null>(null);
 
   const [wd2Form, setWd2Form] = useState({ email: "" });
   const [wd2Busy, setWd2Busy] = useState(false);
@@ -35,10 +44,12 @@ export default function YudisiumAdminPage() {
   };
 
   const fetchData = useCallback(async () => {
-    const [eligibleRes, wd2Res] = await Promise.all([
+    const [eligibleRes, wd2Res, docsRes] = await Promise.all([
       fetch(`/api/events/${eventId}/mahasiswa-eligible`, { credentials: "include" }),
       fetch(`/api/wd2-accounts`, { credentials: "include" }),
+      fetch(`/api/events/${eventId}/lampiran`, { credentials: "include" }),
     ]);
+    if (docsRes.ok) setDocs((await docsRes.json()).documents ?? []);
     if (eligibleRes.ok) setEligible((await eligibleRes.json()).eligible ?? []);
     if (wd2Res.ok) setWd2Accounts((await wd2Res.json()).accounts ?? []);
   }, [eventId]);
@@ -47,6 +58,34 @@ export default function YudisiumAdminPage() {
     setLoading(true);
     fetchData().finally(() => setLoading(false));
   }, [fetchData]);
+
+  const handleUploadDoc = async (kind: Doc["kind"], file: File | undefined) => {
+    if (!file) return;
+    setDocBusy(kind);
+    try {
+      const form = new FormData();
+      form.append("kind", kind);
+      form.append("file", file);
+      const res = await fetch(`/api/events/${eventId}/lampiran`, { method: "POST", credentials: "include", body: form });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message ?? "Gagal mengunggah PDF");
+      setDocs(data.documents ?? []);
+      showToast("Lampiran PDF tersimpan.");
+    } catch (err) {
+      showToast((err as Error).message, "err");
+    } finally {
+      setDocBusy(null);
+    }
+  };
+
+  const handleDeleteDoc = async (kind: Doc["kind"]) => {
+    if (!confirm("Hapus lampiran PDF ini?")) return;
+    setDocBusy(kind);
+    const res = await fetch(`/api/events/${eventId}/lampiran?kind=${kind}`, { method: "DELETE", credentials: "include" });
+    if (res.ok) setDocs((await res.json()).documents ?? []);
+    else showToast("Gagal menghapus lampiran.", "err");
+    setDocBusy(null);
+  };
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -232,6 +271,66 @@ export default function YudisiumAdminPage() {
                 <Plus size={13} /> Tambah
               </button>
             </form>
+          </div>
+
+          {/* Lampiran undangan PDF */}
+          <div className="rounded-2xl bg-white border border-slate-100 p-5">
+            <h3 className="text-sm font-bold text-[#1A1A2E] flex items-center gap-2 mb-1">
+              <FileText size={16} className="text-[#40916C]" /> Lampiran Undangan (PDF)
+            </h3>
+            <p className="text-xs text-slate-500 mb-4">
+              PDF resmi ditampilkan ke mahasiswa sebagai modal di halaman daftar &amp; dashboard. Maks 10MB.
+            </p>
+            <div className="space-y-2">
+              {DOC_KINDS.map(({ kind, label }) => {
+                const doc = docs.find((d) => d.kind === kind);
+                return (
+                  <div key={kind} className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl border border-slate-100">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-[#1A1A2E]">{label}</p>
+                      <p className="text-xs text-slate-400 truncate">
+                        {doc ? `${doc.filename} · ${(doc.size / 1024).toFixed(0)} KB` : "Belum diunggah"}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {doc && (
+                        <>
+                          <a
+                            href={`/api/mahasiswa/lampiran/${kind}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-xs font-semibold text-[#40916C]"
+                          >
+                            Lihat
+                          </a>
+                          <button
+                            onClick={() => handleDeleteDoc(kind)}
+                            disabled={docBusy === kind}
+                            className="text-rose-500 hover:text-rose-700"
+                            title="Hapus"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </>
+                      )}
+                      <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1B4332] text-white text-xs font-semibold hover:bg-[#40916C] cursor-pointer">
+                        {docBusy === kind ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+                        {doc ? "Ganti" : "Unggah"}
+                        <input
+                          type="file"
+                          accept="application/pdf"
+                          className="hidden"
+                          onChange={(e) => {
+                            void handleUploadDoc(kind, e.target.files?.[0]);
+                            e.target.value = "";
+                          }}
+                        />
+                      </label>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
 
           {/* WD2 accounts */}

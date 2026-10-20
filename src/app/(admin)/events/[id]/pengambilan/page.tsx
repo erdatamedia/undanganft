@@ -8,6 +8,8 @@ import {
   Camera,
   CheckCircle2,
   Download,
+  Maximize2,
+  Minimize2,
   Loader2,
   RefreshCcw,
   Search,
@@ -18,7 +20,8 @@ import {
 } from "lucide-react";
 
 type Student = {
-  mahasiswaId: string;
+  mahasiswaId: string | null;
+  program: string | null;
   npm: string;
   name: string;
   email: string | null;
@@ -107,6 +110,27 @@ export default function PengambilanPage() {
 
   const [rekap, setRekap] = useState<Student[]>([]);
   const [totals, setTotals] = useState({ registered: 0, pickedUp: 0, pendingCheck: 0, issues: 0 });
+
+  const [fullscreen, setFullscreen] = useState(false);
+
+  const toggleFullscreen = async () => {
+    const next = !fullscreen;
+    setFullscreen(next);
+    try {
+      if (next && !document.fullscreenElement) await document.documentElement.requestFullscreen();
+      if (!next && document.fullscreenElement) await document.exitFullscreen();
+    } catch {
+      // layar penuh browser ditolak: mode tanpa sidebar tetap aktif
+    }
+  };
+
+  useEffect(() => {
+    const onChange = () => {
+      if (!document.fullscreenElement) setFullscreen(false);
+    };
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
 
   const showToast = (msg: string, type: "ok" | "err" = "ok") => {
     setToast({ msg, type });
@@ -220,6 +244,7 @@ export default function PengambilanPage() {
       setNewPassword(data.password);
       setSelected({
         mahasiswaId: data.mahasiswa.id,
+        program: null,
         npm: data.mahasiswa.npm,
         name: data.mahasiswa.name,
         email: data.mahasiswa.email,
@@ -242,6 +267,32 @@ export default function PengambilanPage() {
     }
   };
 
+  // Mahasiswa hasil impor Excel belum punya akun: buatkan otomatis saat dipilih.
+  const pickStudent = async (s: Student) => {
+    setResults([]);
+    if (s.mahasiswaId) {
+      setSelected(s);
+      return;
+    }
+    setRegBusy(true);
+    try {
+      const res = await fetch(`/api/events/${eventId}/pengambilan/register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ name: s.name, npm: s.npm }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message ?? "Gagal membuat akun mahasiswa");
+      setNewPassword(data.password);
+      setSelected({ ...s, mahasiswaId: data.mahasiswa.id, email: data.mahasiswa.email ?? null });
+    } catch (err) {
+      showToast((err as Error).message, "err");
+    } finally {
+      setRegBusy(false);
+    }
+  };
+
   const resetForm = () => {
     setSelected(null);
     setPhotos({ fakultas: null, univ: null, handover: null });
@@ -256,7 +307,7 @@ export default function PengambilanPage() {
   };
 
   const canSave =
-    selected &&
+    selected?.mahasiswaId &&
     photos.fakultas &&
     photos.handover &&
     (skipUniv ? note.trim() : photos.univ) &&
@@ -294,20 +345,36 @@ export default function PengambilanPage() {
   };
 
   return (
-    <div className="space-y-6">
-      <Link
-        href={`/events/${eventId}`}
-        className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-[#1B4332] transition-colors"
-      >
-        <ArrowLeft size={15} /> Kembali ke Acara
-      </Link>
-
-      <div>
-        <p className="text-xs font-semibold uppercase tracking-widest text-[#40916C]">Meja Pengambilan</p>
-        <h1 className="mt-1 text-xl font-bold text-[#1A1A2E]">Serah-Terima Undangan &amp; Toga</h1>
-        <p className="text-sm text-slate-500 mt-1">
-          Foto bukti bayar &amp; serah-terima disimpan, lalu diverifikasi susulan oleh WD2.
-        </p>
+    <div
+      className={
+        fullscreen
+          ? "fixed inset-0 z-[60] overflow-y-auto bg-[#F7F8FA] p-6 space-y-6"
+          : "space-y-6"
+      }
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          {!fullscreen && (
+            <Link
+              href={`/events/${eventId}`}
+              className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-[#1B4332] transition-colors mb-4"
+            >
+              <ArrowLeft size={15} /> Kembali ke Acara
+            </Link>
+          )}
+          <p className="text-xs font-semibold uppercase tracking-widest text-[#40916C]">Meja Pengambilan</p>
+          <h1 className="mt-1 text-xl font-bold text-[#1A1A2E]">Serah-Terima Undangan &amp; Toga</h1>
+          <p className="text-sm text-slate-500 mt-1">
+            Foto bukti bayar &amp; serah-terima disimpan, lalu diverifikasi susulan oleh WD2.
+          </p>
+        </div>
+        <button
+          onClick={toggleFullscreen}
+          className="shrink-0 inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white text-slate-600 text-sm font-semibold px-3.5 py-2.5 hover:bg-slate-50"
+        >
+          {fullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+          {fullscreen ? "Keluar Layar Penuh" : "Layar Penuh"}
+        </button>
       </div>
 
       {toast && (
@@ -341,16 +408,17 @@ export default function PengambilanPage() {
             <div className="divide-y divide-slate-100 rounded-xl border border-slate-100">
               {results.map((s) => (
                 <button
-                  key={s.mahasiswaId}
-                  onClick={() => {
-                    setSelected(s);
-                    setResults([]);
-                  }}
+                  key={s.mahasiswaId ?? `npm-${s.npm}`}
+                  disabled={regBusy}
+                  onClick={() => void pickStudent(s)}
                   className="w-full text-left px-4 py-3 hover:bg-slate-50 flex items-center justify-between gap-2"
                 >
                   <div>
                     <p className="text-sm font-semibold text-[#1A1A2E]">{s.name}</p>
-                    <p className="text-xs text-slate-400">{s.npm}</p>
+                    <p className="text-xs text-slate-400">
+                      {s.npm}
+                      {s.program ? ` · ${s.program}` : ""}
+                    </p>
                   </div>
                   {s.pickedUp && badge("Sudah ambil", "ok")}
                 </button>
@@ -410,7 +478,10 @@ export default function PengambilanPage() {
               <div className="flex items-start justify-between gap-2">
                 <div>
                   <p className="font-bold text-[#1A1A2E]">{selected.name}</p>
-                  <p className="text-xs text-slate-500">{selected.npm}</p>
+                  <p className="text-xs text-slate-500">
+                    {selected.npm}
+                    {selected.program ? ` · ${selected.program}` : ""}
+                  </p>
                 </div>
                 <button onClick={resetForm} className="text-xs text-slate-500 underline">
                   Ganti
@@ -581,7 +652,7 @@ export default function PengambilanPage() {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {rekap.map((r) => (
-                <tr key={r.mahasiswaId}>
+                <tr key={r.mahasiswaId ?? `npm-${r.npm}`}>
                   <td className="py-2 pr-3 font-medium text-[#1A1A2E]">{r.name}</td>
                   <td className="py-2 pr-3 text-slate-500">{r.npm}</td>
                   <td className="py-2 pr-3">{badge(r.fakultasStatus ?? "-", payTone(r.fakultasStatus))}</td>

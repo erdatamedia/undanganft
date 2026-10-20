@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { CheckCircle2, Copy, GraduationCap, Loader2 } from "lucide-react";
 import { Eyebrow, GlassCard } from "@/components/glass";
+import { LampiranButtons, type Attachments } from "@/components/glass/lampiran";
 
 type EventInfo = {
   name: string;
@@ -31,6 +32,7 @@ export default function DaftarMahasiswaPage() {
   const [copied, setCopied] = useState(false);
   const [eventInfo, setEventInfo] = useState<EventInfo | null>(null);
   const [rundown, setRundown] = useState<RundownInfo[]>([]);
+  const [attachments, setAttachments] = useState<Attachments | null>(null);
 
   useEffect(() => {
     fetch("/api/mahasiswa/active-event-info")
@@ -38,6 +40,7 @@ export default function DaftarMahasiswaPage() {
       .then((data) => {
         setEventInfo(data.event);
         setRundown(data.rundown ?? []);
+        setAttachments(data.attachments ?? null);
       })
       .catch(() => {});
   }, []);
@@ -132,6 +135,13 @@ export default function DaftarMahasiswaPage() {
                 <p className="text-xs font-bold text-[#1B4332]">Wisuda Universitas</p>
                 {eventInfo.univSchedule && <p className="text-sm text-slate-700">🗓️ {eventInfo.univSchedule}</p>}
                 {eventInfo.univVenue && <p className="text-sm text-slate-700">📍 {eventInfo.univVenue}</p>}
+              </div>
+            )}
+
+            {(attachments?.yudisium || attachments?.wisuda) && (
+              <div className="mt-4">
+                <Eyebrow>Lampiran Undangan</Eyebrow>
+                <LampiranButtons attachments={attachments} />
               </div>
             )}
 

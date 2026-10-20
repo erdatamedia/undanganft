@@ -1,5 +1,6 @@
 import { query } from "@/lib/db";
 import { ensureEventSchema } from "@/lib/event";
+import { ensureGraduationSchema } from "@/lib/graduation";
 
 export function normalizePhone(raw: string): string {
   const digitsOnly = (raw || "").replace(/\D+/g, "");
@@ -222,8 +223,18 @@ export async function getAttendee(id: string) {
   return row ? mapRow(row) : null;
 }
 
+async function unlinkSubmissions(attendeeWhere: string, params: unknown[]) {
+  await ensureGraduationSchema();
+  await query(
+    `update graduation_submissions set attendee_id=null, wisuda_confirmed=false, updated_at=now()
+     where attendee_id in (select id from attendees where ${attendeeWhere})`,
+    params
+  );
+}
+
 export async function clearAttendees(eventId: string) {
   await ensureEventSchema();
+  await unlinkSubmissions("event_id=$1", [eventId]);
   await query("delete from attendees where event_id=$1", [eventId]);
 }
 
@@ -231,5 +242,6 @@ export async function deleteAttendee(id: string) {
   await ensureEventSchema();
   const row = await findAttendeeByIdentifier(id);
   if (!row) return;
+  await unlinkSubmissions("id=$1", [row.id]);
   await query("delete from attendees where id=$1", [row.id]);
 }

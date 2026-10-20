@@ -152,6 +152,34 @@ async function ensureGraduationSchemaInternal() {
     )
   `);
   await query(`create index if not exists idx_grad_pickups_check on graduation_pickups(wd2_check_status)`);
+
+  // Deleting an attendee must not be blocked by the submission link
+  await query(`
+    do $$ begin
+      if exists (
+        select 1 from pg_constraint
+        where conname = 'graduation_submissions_attendee_id_fkey' and confdeltype <> 'n'
+      ) then
+        alter table graduation_submissions drop constraint graduation_submissions_attendee_id_fkey;
+        alter table graduation_submissions add constraint graduation_submissions_attendee_id_fkey
+          foreign key (attendee_id) references attendees(id) on delete set null;
+      end if;
+    end $$
+  `);
+
+  await query(`
+    create table if not exists event_documents (
+      id uuid primary key default uuid_generate_v4(),
+      event_id uuid not null references events(id) on delete cascade,
+      kind text not null check (kind in ('yudisium','wisuda')),
+      filename text not null,
+      mime text not null default 'application/pdf',
+      size int not null,
+      data bytea not null,
+      updated_at timestamptz not null default now(),
+      unique (event_id, kind)
+    )
+  `);
 }
 
 export async function ensureGraduationSchema() {
@@ -854,7 +882,8 @@ export async function checkPickup(
 // ─── Desk lookup & rekap ────────────────────────────────────────────────────
 
 export type DeskStudent = {
-  mahasiswaId: string;
+  mahasiswaId: string | null;
+  program: string | null;
   npm: string;
   name: string;
   email: string | null;
@@ -871,7 +900,8 @@ export type DeskStudent = {
 };
 
 type DeskRow = {
-  mahasiswa_id: string;
+  mahasiswa_id: string | null;
+  program: string | null;
   npm: string;
   name: string;
   email: string | null;
@@ -887,7 +917,7 @@ type DeskRow = {
 };
 
 const DESK_SELECT = `
-  select m.id as mahasiswa_id, m.npm, m.name, m.email,
+  select m.id as mahasiswa_id, el.program as program, m.npm, m.name, m.email,
          gs.id as submission_id, gs.yudisium_status,
          (select status from graduation_payments where submission_id = gs.id and kind='fakultas') as fakultas_status,
          (select status from graduation_payments where submission_id = gs.id and kind='univ') as univ_status,
@@ -896,10 +926,12 @@ const DESK_SELECT = `
   from mahasiswa m
   left join graduation_submissions gs on gs.mahasiswa_id = m.id and gs.event_id = $1
   left join graduation_pickups gp on gp.submission_id = gs.id
+  left join mahasiswa_eligible el on el.event_id = $1 and el.npm = m.npm
 `;
 
 const mapDesk = (row: DeskRow): DeskStudent => ({
   mahasiswaId: row.mahasiswa_id,
+  program: row.program,
   npm: row.npm,
   name: row.name,
   email: row.email,
@@ -919,7 +951,14 @@ export async function searchDeskStudents(eventId: string, q: string): Promise<De
   await ensureGraduationSchema();
   const term = `%${q.trim()}%`;
   const rows = await query<DeskRow>(
-    `${DESK_SELECT} where m.npm ilike $2 or m.name ilike $2 order by m.name asc limit 20`,
+    `select * from (
+       ${DESK_SELECT} where m.npm ilike $2 or m.name ilike $2
+       union all
+       select null::uuid, e.program, e.npm, e.name, null, null, null, null, null, null, null, null, null, null
+       from mahasiswa_eligible e
+       where e.event_id = $1 and (e.npm ilike $2 or e.name ilike $2)
+         and not exists (select 1 from mahasiswa m2 where m2.npm = e.npm)
+     ) t order by name asc limit 20`,
     [eventId, term]
   );
   return rows.map(mapDesk);
@@ -1006,4 +1045,51 @@ export async function countUnreadNotifications(
 export async function markNotificationRead(id: string): Promise<void> {
   await ensureGraduationSchema();
   await query("update graduation_notifications set read_at=now() where id=$1 and read_at is null", [id]);
+}
+
+// ─── Lampiran undangan (PDF) ────────────────────────────────────────────────
+
+export type DocKind = "yudisium" | "wisuda";
+export type EventDocumentMeta = { kind: DocKind; filename: string; size: number; updatedAt: string };
+
+export async function listEventDocuments(eventId: string): Promise<EventDocumentMeta[]> {
+  await ensureGraduationSchema();
+  const rows = await query<{ kind: DocKind; filename: string; size: number; updated_at: string }>(
+    "select kind, filename, size, updated_at from event_documents where event_id=$1",
+    [eventId]
+  );
+  return rows.map((r) => ({ kind: r.kind, filename: r.filename, size: r.size, updatedAt: r.updated_at }));
+}
+
+export async function saveEventDocument(
+  eventId: string,
+  kind: DocKind,
+  filename: string,
+  data: Buffer
+): Promise<void> {
+  await ensureGraduationSchema();
+  await query(
+    `insert into event_documents (event_id, kind, filename, size, data)
+     values ($1, $2, $3, $4, $5)
+     on conflict (event_id, kind) do update
+       set filename=excluded.filename, size=excluded.size, data=excluded.data, updated_at=now()`,
+    [eventId, kind, filename, data.length, data]
+  );
+}
+
+export async function deleteEventDocument(eventId: string, kind: DocKind): Promise<void> {
+  await ensureGraduationSchema();
+  await query("delete from event_documents where event_id=$1 and kind=$2", [eventId, kind]);
+}
+
+export async function getEventDocument(
+  eventId: string,
+  kind: DocKind
+): Promise<{ filename: string; data: Buffer } | null> {
+  await ensureGraduationSchema();
+  const rows = await query<{ filename: string; data: Buffer }>(
+    "select filename, data from event_documents where event_id=$1 and kind=$2 limit 1",
+    [eventId, kind]
+  );
+  return rows[0] ?? null;
 }

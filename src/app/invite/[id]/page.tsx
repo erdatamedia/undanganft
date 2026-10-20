@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { getEvent, resolveEvent } from "@/lib/event";
 import { getAttendee, normalizeAttendeeId } from "@/lib/storage";
 import { listRundownItems } from "@/lib/rundown";
+import { GlassCard } from "@/components/glass";
 import { InviteQr } from "@/components/invite-qr";
 
 export const dynamic = "force-dynamic";
@@ -54,23 +55,18 @@ export default async function InvitePage(props: Props) {
   })();
 
   return (
-    <div className="min-h-screen bg-[#F8FAF9]">
-      {/* Header */}
-      <div className="bg-[#1B4332] px-6 py-8 text-white">
-        <div className="mx-auto max-w-sm">
-          <p className="text-xs font-bold uppercase tracking-[3px] text-[#74C69D]">
-            Fakultas Teknik
-          </p>
-          <h1 className="mt-1 text-xl font-bold leading-tight">
-            Universitas Islam Malang
-          </h1>
-          <p className="mt-1 text-xs text-white/50">Undangan Digital Resmi</p>
-        </div>
+    <div className="glass-bg">
+      <div className="mx-auto max-w-sm px-5 pt-8">
+        <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-[#40916C]">
+          Fakultas Teknik
+        </p>
+        <h1 className="glass-title mt-1">Universitas Islam Malang</h1>
+        <p className="mt-1 text-xs text-slate-500">Undangan Digital Resmi</p>
       </div>
 
-      <div className="mx-auto max-w-sm px-5 py-6 space-y-4">
+      <div className="mx-auto max-w-sm px-5 py-5 space-y-4">
         {/* Personal greeting */}
-        <div className="rounded-2xl bg-white border border-slate-100 p-5 shadow-sm">
+        <GlassCard strong>
           <p className="text-xs text-slate-400 mb-2">Kepada Yth,</p>
           <h2 className="text-xl font-bold text-[#1A1A2E] leading-tight">
             {attendee.name}
@@ -86,10 +82,10 @@ export default async function InvitePage(props: Props) {
               🪑 Nomor Kursi: {attendee.seat}
             </div>
           )}
-        </div>
+        </GlassCard>
 
         {/* Event details */}
-        <div className="rounded-2xl bg-white border border-slate-100 p-5 shadow-sm">
+        <GlassCard>
           <p className="text-xs font-bold uppercase tracking-[2px] text-[#40916C] mb-3">
             Detail Acara
           </p>
@@ -123,7 +119,7 @@ export default async function InvitePage(props: Props) {
               href={mapsUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex-1 text-center text-xs font-semibold py-2.5 px-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-700 hover:border-slate-300 transition-colors"
+              className="flex-1 text-center text-xs font-semibold py-2.5 px-3 glass-btn !text-xs !py-2.5 !px-3"
             >
               🗺️ Lihat Lokasi
             </a>
@@ -131,16 +127,16 @@ export default async function InvitePage(props: Props) {
               href={calendarUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex-1 text-center text-xs font-semibold py-2.5 px-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-700 hover:border-slate-300 transition-colors"
+              className="flex-1 text-center text-xs font-semibold py-2.5 px-3 glass-btn !text-xs !py-2.5 !px-3"
             >
               📆 Simpan ke Kalender
             </a>
           </div>
-        </div>
+        </GlassCard>
 
         {/* Susunan Acara */}
         {rundownItems.length > 0 && (
-          <details className="group rounded-2xl bg-white border border-slate-100 p-5 shadow-sm">
+          <details className="group glass-card glass-enter p-5">
             <summary className="flex items-center justify-between cursor-pointer list-none">
               <span className="text-xs font-bold uppercase tracking-[2px] text-[#40916C]">
                 Susunan Acara
@@ -168,7 +164,7 @@ export default async function InvitePage(props: Props) {
         )}
 
         {/* QR Code */}
-        <div className="rounded-2xl bg-white border border-slate-100 p-5 shadow-sm text-center">
+        <GlassCard className="text-center">
           <p className="text-xs font-bold uppercase tracking-[2px] text-[#40916C] mb-1">
             QR Konfirmasi Kehadiran
           </p>
@@ -183,10 +179,10 @@ export default async function InvitePage(props: Props) {
             <br />
             Pastikan layar cukup terang saat ditunjukkan.
           </p>
-        </div>
+        </GlassCard>
 
         {/* Instructions */}
-        <div className="rounded-2xl bg-[#1B4332] p-5 text-white">
+        <div className="rounded-3xl bg-[#1B4332]/90 backdrop-blur-xl p-5 text-white shadow-lg">
           <p className="text-xs font-bold uppercase tracking-[2px] text-[#74C69D] mb-3">
             Alur Kehadiran
           </p>

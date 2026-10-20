@@ -17,6 +17,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { InstallPrompt } from "@/components/install-prompt";
+import { LampiranButtons, type Attachments } from "@/components/glass/lampiran";
 import { Eyebrow, GlassCard, GlassSheet, StatusPill } from "@/components/glass";
 
 type PaymentKind = "fakultas" | "univ";
@@ -80,6 +81,7 @@ export default function MahasiswaDashboardPage() {
   const [unread, setUnread] = useState(0);
   const [sheet, setSheet] = useState<"notif" | "rundown" | "absent" | null>(null);
   const [rundown, setRundown] = useState<RundownInfo[]>([]);
+  const [attachments, setAttachments] = useState<Attachments | null>(null);
   const [absentReason, setAbsentReason] = useState("");
 
   const fileRefs = useRef<Record<PaymentKind, HTMLInputElement | null>>({ fakultas: null, univ: null });
@@ -121,6 +123,7 @@ export default function MahasiswaDashboardPage() {
     if (!res.ok) return;
     const data = await res.json();
     setRundown(data.rundown ?? []);
+    setAttachments(data.attachments ?? null);
   }, []);
 
   useEffect(() => {
@@ -315,6 +318,16 @@ export default function MahasiswaDashboardPage() {
             <p className="text-xs text-slate-500 mt-2">
               {new Date(pickup.handedAt).toLocaleString("id-ID", { dateStyle: "long", timeStyle: "short" })}
             </p>
+          </GlassCard>
+        )}
+
+        {(attachments?.yudisium || attachments?.wisuda) && (
+          <GlassCard>
+            <Eyebrow>Lampiran Undangan (PDF)</Eyebrow>
+            <p className="text-xs text-slate-600 mb-3">
+              Lihat undangan resmi sambil menunggu verifikasi WD2 dan undangan check-in Anda.
+            </p>
+            <LampiranButtons attachments={attachments} />
           </GlassCard>
         )}
 

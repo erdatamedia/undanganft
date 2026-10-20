@@ -5,6 +5,56 @@ import { importEligible } from "@/lib/graduation";
 
 export const runtime = "nodejs";
 
+type Row = { npm: string; name: string; program?: string };
+
+const norm = (v: unknown) =>
+  String(v ?? "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+
+const titleCase = (text: string) =>
+  text
+    .toLowerCase()
+    .replace(/\b\p{L}/gu, (c) => c.toUpperCase());
+
+/** "DAFTAR HADIR MAHASISWA TEKNIK SIPIL" -> "Teknik Sipil"; falls back to the sheet name. */
+function programFromSheet(sheet: XLSX.WorkSheet, sheetName: string): string {
+  const title = String(sheet["A1"]?.v ?? "");
+  const match = title.match(/MAHASISWA\s+(.+)$/i);
+  return titleCase((match?.[1] ?? sheetName).trim());
+}
+
+function parseSheet(sheet: XLSX.WorkSheet, sheetName: string): Row[] {
+  const grid = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: "" });
+
+  let headerIndex = -1;
+  let cols = { npm: -1, name: -1, program: -1 };
+  for (let i = 0; i < Math.min(grid.length, 15); i++) {
+    const keys = grid[i].map(norm);
+    const npm = keys.findIndex((k) => ["npm", "nomor_pokok_mahasiswa", "nomor_induk"].includes(k));
+    const name = keys.findIndex((k) => ["nama", "name", "nama_lengkap"].includes(k));
+    if (npm !== -1 && name !== -1) {
+      headerIndex = i;
+      cols = { npm, name, program: keys.findIndex((k) => ["program", "prodi", "program_studi"].includes(k)) };
+      break;
+    }
+  }
+  if (headerIndex === -1) return [];
+
+  const sheetProgram = programFromSheet(sheet, sheetName);
+  const rows: Row[] = [];
+  for (const line of grid.slice(headerIndex + 1)) {
+    const npm = String(line[cols.npm] ?? "").trim();
+    const name = String(line[cols.name] ?? "").trim().replace(/\s+/g, " ");
+    if (!npm || !name) continue;
+    const program = cols.program !== -1 ? String(line[cols.program] ?? "").trim() : "";
+    rows.push({ npm, name, program: program || sheetProgram });
+  }
+  return rows;
+}
+
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -21,31 +71,16 @@ export async function POST(
     return NextResponse.json({ message: "File Excel wajib diunggah." }, { status: 400 });
   }
 
-  let rows: { npm: string; name: string; program?: string }[] = [];
+  const rows: Row[] = [];
+  const perSheet: Record<string, number> = {};
   try {
     const buffer = Buffer.from(await file.arrayBuffer());
     const wb = XLSX.read(buffer, { type: "buffer" });
-    const sheet = wb.Sheets[wb.SheetNames[0]];
-    const raw = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
-
-    rows = raw
-      .map((row) => {
-        const normalized = Object.fromEntries(
-          Object.entries(row).map(([k, v]) => [
-            k.toLowerCase().trim().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, ""),
-            v,
-          ])
-        ) as Record<string, string>;
-
-        const npm = String(
-          normalized.npm || normalized.nomor_pokok_mahasiswa || normalized.nomor_induk || ""
-        ).trim();
-        const name = String(normalized.nama || normalized.name || normalized.nama_lengkap || "").trim();
-        const program = String(normalized.program || normalized.prodi || normalized.program_studi || "").trim();
-
-        return { npm, name, program: program || undefined };
-      })
-      .filter((row) => row.npm && row.name);
+    for (const sheetName of wb.SheetNames) {
+      const parsed = parseSheet(wb.Sheets[sheetName], sheetName);
+      perSheet[sheetName] = parsed.length;
+      rows.push(...parsed);
+    }
   } catch (error) {
     return NextResponse.json(
       { message: `File Excel tidak valid: ${(error as Error).message}` },
@@ -61,5 +96,5 @@ export async function POST(
   }
 
   const result = await importEligible(id, rows);
-  return NextResponse.json(result);
+  return NextResponse.json({ ...result, perSheet });
 }
