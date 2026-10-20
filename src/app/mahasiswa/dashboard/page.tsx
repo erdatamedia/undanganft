@@ -17,6 +17,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { InstallPrompt } from "@/components/install-prompt";
+import { FotoVideotronCard } from "@/components/glass/foto-videotron";
 import { LampiranButtons, type Attachments } from "@/components/glass/lampiran";
 import { Eyebrow, GlassCard, GlassSheet, StatusPill } from "@/components/glass";
 
@@ -330,6 +331,8 @@ export default function MahasiswaDashboardPage() {
             <LampiranButtons attachments={attachments} />
           </GlassCard>
         )}
+
+        <FotoVideotronCard />
 
         {/* Yudisium */}
         <GlassCard>

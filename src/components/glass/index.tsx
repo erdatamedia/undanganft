@@ -4,13 +4,15 @@ export function GlassCard({
   children,
   className = "",
   strong = false,
+  id,
 }: {
   children: ReactNode;
   className?: string;
   strong?: boolean;
+  id?: string;
 }) {
   return (
-    <div className={`${strong ? "glass-card-strong" : "glass-card"} glass-enter p-5 ${className}`}>
+    <div id={id} className={`${strong ? "glass-card-strong" : "glass-card"} glass-enter p-5 ${className}`}>
       {children}
     </div>
   );

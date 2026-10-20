@@ -30,6 +30,7 @@ async function ensureGraduationSchemaInternal() {
     )
   `);
   await query(`alter table mahasiswa add column if not exists email text`);
+  await query(`alter table mahasiswa add column if not exists videotron_photo text`);
 
   await query(`
     create table if not exists wd2_accounts (
@@ -444,6 +445,17 @@ export async function importEligible(
          values ($1, $2, $3, $4)
          on conflict (event_id, npm) do update set name=excluded.name, program=excluded.program`,
         [eventId, normalizeNpm(row.npm), row.name.trim(), row.program?.trim() || null]
+      );
+      // Peserta acara: ikut masuk daftar attendees (draft) bila NPM belum ada.
+      const npm = normalizeNpm(row.npm);
+      const name = row.name.trim();
+      await client.query(
+        `insert into attendees (id, token, event_id, name, program, phone, email, npm, seat, status, whatsapp_sent)
+         select upper(regexp_replace($1::uuid::text || '-' || $2::text || '-' || $3::text, '\\s+', ' ', 'g')), gen_random_uuid()::text,
+                $1::uuid, $2::text, $4::text, '-', '', $3::text, '-', 'draft', false
+         where not exists (select 1 from attendees where event_id=$1::uuid and npm=$3::text)
+         on conflict (id) do nothing`,
+        [eventId, name, npm, row.program?.trim() || "Belum ditentukan"]
       );
     }
     await client.query("commit");
@@ -1092,4 +1104,51 @@ export async function getEventDocument(
     [eventId, kind]
   );
   return rows[0] ?? null;
+}
+
+// ─── Foto semi formal (videotron) ───────────────────────────────────────────
+
+export async function setVideotronPhoto(mahasiswaId: string, dataUri: string | null): Promise<void> {
+  await ensureGraduationSchema();
+  await query("update mahasiswa set videotron_photo=$2 where id=$1", [mahasiswaId, dataUri]);
+}
+
+export async function getVideotronPhotoById(mahasiswaId: string): Promise<string | null> {
+  await ensureGraduationSchema();
+  const rows = await query<{ videotron_photo: string | null }>(
+    "select videotron_photo from mahasiswa where id=$1",
+    [mahasiswaId]
+  );
+  return rows[0]?.videotron_photo ?? null;
+}
+
+export async function getVideotronPhotoByNpm(npm: string): Promise<string | null> {
+  await ensureGraduationSchema();
+  const rows = await query<{ videotron_photo: string | null }>(
+    "select videotron_photo from mahasiswa where npm=$1",
+    [normalizeNpm(npm)]
+  );
+  return rows[0]?.videotron_photo ?? null;
+}
+
+export type VideotronRow = { npm: string; name: string; program: string | null; hasPhoto: boolean };
+
+/** Everyone known for the event (imported or registered) with whether a photo was uploaded. */
+export async function listVideotron(eventId: string): Promise<VideotronRow[]> {
+  await ensureGraduationSchema();
+  const rows = await query<{ npm: string; name: string; program: string | null; has_photo: boolean }>(
+    `select x.npm, x.name, x.program, (m.videotron_photo is not null) as has_photo
+       from (
+         select npm, name, program from mahasiswa_eligible where event_id=$1
+         union
+         select m2.npm, m2.name, null::text as program
+           from graduation_submissions gs join mahasiswa m2 on m2.id=gs.mahasiswa_id
+          where gs.event_id=$1
+            and not exists (select 1 from mahasiswa_eligible e where e.event_id=$1 and e.npm=m2.npm)
+       ) x
+       left join mahasiswa m on m.npm = x.npm
+      order by coalesce(x.program,'~'), x.name`,
+    [eventId]
+  );
+  return rows.map((r) => ({ npm: r.npm, name: r.name, program: r.program, hasPhoto: r.has_photo }));
 }

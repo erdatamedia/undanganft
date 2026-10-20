@@ -6,6 +6,7 @@ import Link from "next/link";
 import { ArrowLeft, FileText, Loader2, Plus, ShieldCheck, Trash2, Upload, Users } from "lucide-react";
 
 type Eligible = { id: string; npm: string; name: string; program: string | null };
+type VRow = { npm: string; name: string; program: string | null; hasPhoto: boolean };
 type Wd2Account = { id: string; email: string };
 type Doc = { kind: "yudisium" | "wisuda"; filename: string; size: number; updatedAt: string };
 
@@ -27,6 +28,7 @@ export default function YudisiumAdminPage() {
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [importBusy, setImportBusy] = useState(false);
 
+  const [vrows, setVrows] = useState<VRow[]>([]);
   const [docs, setDocs] = useState<Doc[]>([]);
   const [docBusy, setDocBusy] = useState<string | null>(null);
 
@@ -49,6 +51,8 @@ export default function YudisiumAdminPage() {
       fetch(`/api/wd2-accounts`, { credentials: "include" }),
       fetch(`/api/events/${eventId}/lampiran`, { credentials: "include" }),
     ]);
+    const vRes = await fetch(`/api/events/${eventId}/foto-videotron`, { credentials: "include" });
+    if (vRes.ok) setVrows((await vRes.json()).rows ?? []);
     if (docsRes.ok) setDocs((await docsRes.json()).documents ?? []);
     if (eligibleRes.ok) setEligible((await eligibleRes.json()).eligible ?? []);
     if (wd2Res.ok) setWd2Accounts((await wd2Res.json()).accounts ?? []);
@@ -331,6 +335,43 @@ export default function YudisiumAdminPage() {
                 );
               })}
             </div>
+          </div>
+
+          {/* Foto videotron */}
+          <div className="rounded-2xl bg-white border border-slate-100 p-5">
+            <h3 className="text-sm font-bold text-[#1A1A2E] mb-1">
+              Foto Videotron ({vrows.filter((r) => r.hasPhoto).length}/{vrows.length})
+            </h3>
+            <p className="text-xs text-slate-500 mb-4">Foto semi formal dari mahasiswa, dikelompokkan per prodi.</p>
+            {Object.entries(
+              vrows.reduce<Record<string, VRow[]>>((acc, r) => {
+                (acc[r.program ?? "Tanpa prodi"] ||= []).push(r);
+                return acc;
+              }, {})
+            ).map(([prodi, list]) => (
+              <details key={prodi} className="mb-2">
+                <summary className="cursor-pointer text-sm font-semibold text-[#1B4332]">
+                  {prodi} · {list.filter((r) => r.hasPhoto).length}/{list.length}
+                </summary>
+                <div className="mt-2 divide-y divide-slate-100">
+                  {list.map((r) => (
+                    <div key={r.npm} className="py-1.5 text-sm flex items-center justify-between">
+                      <span>
+                        {r.name} <span className="text-slate-400">{r.npm}</span>
+                      </span>
+                      {r.hasPhoto ? (
+                        <span className="flex gap-3 text-xs font-semibold text-[#40916C]">
+                          <a href={`/api/events/${eventId}/foto-videotron/${r.npm}`} target="_blank" rel="noreferrer">Lihat</a>
+                          <a href={`/api/events/${eventId}/foto-videotron/${r.npm}?download=1`}>Unduh</a>
+                        </span>
+                      ) : (
+                        <span className="text-xs text-amber-600">Belum</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </details>
+            ))}
           </div>
 
           {/* WD2 accounts */}

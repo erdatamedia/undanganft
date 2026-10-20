@@ -172,6 +172,15 @@ export async function addAttendee(
   return mapRow(rows[0]);
 }
 
+export async function findAttendeeByNpm(eventId: string, npm: string) {
+  await ensureEventSchema();
+  const rows = await query<AttendeeRow>(
+    "select * from attendees where event_id=$1 and npm=$2 limit 1",
+    [eventId, npm]
+  );
+  return rows[0] ? mapRow(rows[0]) : null;
+}
+
 export async function updateAttendee(
   id: string,
   updater: (current: AttendeeRecord) => AttendeeRecord

@@ -4,7 +4,7 @@ import {
   setSubmissionAttendee,
   type GraduationSubmissionRecord,
 } from "@/lib/graduation";
-import { addAttendee, getAttendee, type AttendeeRecord } from "@/lib/storage";
+import { addAttendee, findAttendeeByNpm, getAttendee, type AttendeeRecord } from "@/lib/storage";
 
 /** Creates the attendee (QR/invite) for a submission once, reusing it afterwards. */
 export async function ensureAttendeeForSubmission(
@@ -17,6 +17,12 @@ export async function ensureAttendeeForSubmission(
 
   const mahasiswa = await getMahasiswaById(submission.mahasiswaId);
   if (!mahasiswa) return null;
+
+  const imported = await findAttendeeByNpm(submission.eventId, mahasiswa.npm);
+  if (imported) {
+    await setSubmissionAttendee(submission.id, imported.id);
+    return imported;
+  }
 
   const eligible = await findEligible(submission.eventId, mahasiswa.npm);
   const attendee = await addAttendee(

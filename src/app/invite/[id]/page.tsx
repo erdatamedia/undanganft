@@ -2,6 +2,8 @@ import { notFound } from "next/navigation";
 import { getEvent, resolveEvent } from "@/lib/event";
 import { getAttendee, normalizeAttendeeId } from "@/lib/storage";
 import { listRundownItems } from "@/lib/rundown";
+import Link from "next/link";
+import { Home, QrCode } from "lucide-react";
 import { GlassCard } from "@/components/glass";
 import { InviteQr } from "@/components/invite-qr";
 
@@ -64,7 +66,7 @@ export default async function InvitePage(props: Props) {
         <p className="mt-1 text-xs text-slate-500">Undangan Digital Resmi</p>
       </div>
 
-      <div className="mx-auto max-w-sm px-5 py-5 space-y-4">
+      <div className="mx-auto max-w-sm px-5 pt-5 pb-28 space-y-4">
         {/* Personal greeting */}
         <GlassCard strong>
           <p className="text-xs text-slate-400 mb-2">Kepada Yth,</p>
@@ -164,7 +166,7 @@ export default async function InvitePage(props: Props) {
         )}
 
         {/* QR Code */}
-        <GlassCard className="text-center">
+        <GlassCard className="text-center" id="qr">
           <p className="text-xs font-bold uppercase tracking-[2px] text-[#40916C] mb-1">
             QR Konfirmasi Kehadiran
           </p>
@@ -207,6 +209,17 @@ export default async function InvitePage(props: Props) {
           </p>
         </div>
       </div>
+
+      <nav className="glass-bar">
+        <Link href="/mahasiswa/dashboard">
+          <Home size={20} />
+          Dashboard
+        </Link>
+        <a href="#qr" className="is-active">
+          <QrCode size={20} />
+          QR Saya
+        </a>
+      </nav>
     </div>
   );
 }
