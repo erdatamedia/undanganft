@@ -104,6 +104,14 @@ export default function YudisiumAdminPage() {
     setDocBusy(null);
   };
 
+  const handleDeleteRegistrant = async (r: Registrant) => {
+    if (!confirm(`Hapus akun ${r.name} (${r.npm})? Pengajuan, bukti bayar, dan data serah-terimanya ikut terhapus. Tidak bisa dibatalkan.`)) return;
+    const res = await fetch(`/api/events/${eventId}/pendaftar/${r.mahasiswaId}`, { method: "DELETE", credentials: "include" });
+    if (res.ok) showToast(`Akun ${r.name} dihapus.`);
+    else showToast("Gagal menghapus akun.", "err");
+    await fetchData();
+  };
+
   const handleSync = async () => {
     setSyncBusy(true);
     const res = await fetch(`/api/events/${eventId}/pendaftar`, { method: "POST", credentials: "include" });
@@ -391,8 +399,17 @@ export default function YudisiumAdminPage() {
                       <span className="font-medium text-[#1A1A2E]">{r.name}</span>
                       <span className="text-slate-400 ml-2">{r.npm}{r.program ? ` · ${r.program}` : ""}</span>
                     </span>
-                    <span className="text-[11px] text-slate-500 shrink-0">
-                      Yudisium: {r.yudisiumStatus ?? "-"} · Fak: {r.fakultasStatus ?? "-"} · Univ: {r.univStatus ?? "-"}
+                    <span className="flex items-center gap-3 shrink-0">
+                      <span className="text-[11px] text-slate-500">
+                        Yudisium: {r.yudisiumStatus ?? "-"} · Fak: {r.fakultasStatus ?? "-"} · Univ: {r.univStatus ?? "-"}
+                      </span>
+                      <button
+                        onClick={() => handleDeleteRegistrant(r)}
+                        className="text-rose-500 hover:text-rose-700"
+                        title="Hapus akun"
+                      >
+                        <Trash2 size={14} />
+                      </button>
                     </span>
                   </div>
                 ))}

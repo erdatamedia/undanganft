@@ -1205,3 +1205,46 @@ export async function setMahasiswaEmail(id: string, email: string): Promise<void
   await ensureGraduationSchema();
   await query("update mahasiswa set email=$2 where id=$1", [id, email]);
 }
+
+/**
+ * Menghapus akun mahasiswa beserta pengajuan, bukti bayar, serah-terima, dan notifikasinya.
+ * Peserta (attendee) ikut dihapus hanya bila bukan berasal dari daftar impor Excel.
+ */
+export async function deleteMahasiswaAccount(mahasiswaId: string): Promise<boolean> {
+  await ensureGraduationSchema();
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const m = await client.query<{ npm: string }>("select npm from mahasiswa where id=$1", [mahasiswaId]);
+    if (!m.rows[0]) {
+      await client.query("rollback");
+      return false;
+    }
+    const npm = m.rows[0].npm;
+    const subs = await client.query<{ id: string; event_id: string; attendee_id: string | null }>(
+      "select id, event_id, attendee_id from graduation_submissions where mahasiswa_id=$1",
+      [mahasiswaId]
+    );
+    for (const sub of subs.rows) {
+      await client.query("delete from graduation_pickups where submission_id=$1", [sub.id]);
+      await client.query("delete from graduation_payments where submission_id=$1", [sub.id]);
+      await client.query("delete from graduation_submissions where id=$1", [sub.id]);
+      if (sub.attendee_id) {
+        await client.query(
+          `delete from attendees where id=$1
+             and not exists (select 1 from mahasiswa_eligible e where e.event_id=$2 and e.npm=$3)`,
+          [sub.attendee_id, sub.event_id, npm]
+        );
+      }
+    }
+    await client.query("delete from graduation_notifications where recipient_type='mahasiswa' and recipient_id=$1", [mahasiswaId]);
+    await client.query("delete from mahasiswa where id=$1", [mahasiswaId]);
+    await client.query("commit");
+    return true;
+  } catch (err) {
+    await client.query("rollback");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
