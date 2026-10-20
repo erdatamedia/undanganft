@@ -14,6 +14,7 @@ import Link from "next/link";
 import {
   ArrowLeft,
   CalendarDays,
+  Camera,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
@@ -128,6 +129,12 @@ export default function EventDetailPage() {
             )}
           </div>
           <div className="flex items-center gap-2 shrink-0">
+            <Link
+              href={`/events/${eventId}/pengambilan`}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-slate-200 text-slate-600 text-sm font-semibold hover:border-slate-300 transition-colors"
+            >
+              <Camera size={15} /> Meja Pengambilan
+            </Link>
             <Link
               href={`/events/${eventId}/yudisium`}
               className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-slate-200 text-slate-600 text-sm font-semibold hover:border-slate-300 transition-colors"
@@ -888,6 +895,7 @@ function EventSettingsInline({
       timeEnd: event.timeEnd ?? "", venue: event.venue, gate: event.gate, status: event.status,
       yudisiumSchedule: event.yudisiumSchedule ?? "", yudisiumVenue: event.yudisiumVenue ?? "",
       yudisiumDresscode: event.yudisiumDresscode ?? "", wisudaDresscode: event.wisudaDresscode ?? "",
+      univSchedule: event.univSchedule ?? "", univVenue: event.univVenue ?? "",
     });
   }, [event]);
 
@@ -904,6 +912,7 @@ function EventSettingsInline({
           timeEnd: form.timeEnd, venue: form.venue, gate: form.gate, status: form.status,
           yudisiumSchedule: form.yudisiumSchedule, yudisiumVenue: form.yudisiumVenue,
           yudisiumDresscode: form.yudisiumDresscode, wisudaDresscode: form.wisudaDresscode,
+          univSchedule: form.univSchedule, univVenue: form.univVenue,
         }),
       });
       if (res.status === 401) { onUnauthorized(); return; }
@@ -958,6 +967,8 @@ function EventSettingsInline({
         <InputField label="Lokasi Yudisium" name="yudisiumVenue" value={form.yudisiumVenue ?? ""} onChange={sf("yudisiumVenue")} placeholder="cth. Gedung B Lantai 7" />
         <InputField label="Dresscode Yudisium" name="yudisiumDresscode" value={form.yudisiumDresscode ?? ""} onChange={sf("yudisiumDresscode")} placeholder="cth. Hitam putih, almamater" />
         <InputField label="Dresscode Wisuda Pelepasan" name="wisudaDresscode" value={form.wisudaDresscode ?? ""} onChange={sf("wisudaDresscode")} placeholder="cth. Batik dan kebaya" />
+        <InputField label="Jadwal Wisuda Univ" name="univSchedule" value={form.univSchedule ?? ""} onChange={sf("univSchedule")} placeholder="cth. Minggu, 25 Oktober 2026" />
+        <InputField label="Lokasi Wisuda Univ" name="univVenue" value={form.univVenue ?? ""} onChange={sf("univVenue")} placeholder="cth. Gedung Bundar UNISMA" />
       </div>
       <label className="flex flex-col gap-1 text-xs">
         <span className="font-semibold text-slate-600">Status</span>

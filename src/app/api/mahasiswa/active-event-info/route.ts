@@ -25,9 +25,12 @@ export async function GET() {
     yudisium_venue: string | null;
     yudisium_dresscode: string | null;
     wisuda_dresscode: string | null;
+    univ_schedule: string | null;
+    univ_venue: string | null;
   }>(
     `select name, date, time, time_end, venue, status,
-            yudisium_schedule, yudisium_venue, yudisium_dresscode, wisuda_dresscode
+            yudisium_schedule, yudisium_venue, yudisium_dresscode, wisuda_dresscode,
+            univ_schedule, univ_venue
      from events where id=$1 limit 1`,
     [eventId]
   );
@@ -54,6 +57,8 @@ export async function GET() {
       yudisiumVenue: row.yudisium_venue,
       yudisiumDresscode: row.yudisium_dresscode,
       wisudaDresscode: row.wisuda_dresscode,
+      univSchedule: row.univ_schedule,
+      univVenue: row.univ_venue,
     },
     rundown: publicRundown,
   });

@@ -6,61 +6,100 @@ import {
   Bell,
   CheckCircle2,
   CheckSquare,
+  ClipboardCheck,
+  Inbox,
   Loader2,
   LogOut,
   Square,
-  ShieldCheck,
-  X,
   XCircle,
 } from "lucide-react";
+import { Eyebrow, GlassCard, GlassSheet, StatusPill } from "@/components/glass";
 
-type Submission = {
+type Kind = "fakultas" | "univ";
+type Payment = {
   id: string;
+  kind: Kind;
+  proof: string | null;
+  status: "none" | "pending" | "approved" | "rejected" | "desk";
+  rejectReason: string | null;
+} | null;
+
+type QueueItem = {
+  submissionId: string;
   mahasiswaNpm: string;
   mahasiswaName: string;
   mahasiswaEmail: string | null;
-  paymentProof: string | null;
-  paymentProofUploadedAt: string | null;
+  payments: { fakultas: Payment; univ: Payment };
 };
 
-type Notification = {
+type PickupItem = {
   id: string;
-  title: string;
-  body: string | null;
-  readAt: string | null;
+  mahasiswaNpm: string;
+  mahasiswaName: string;
+  handedAt: string;
+  undanganGiven: boolean;
+  togaGiven: boolean;
+  handoverPhoto: string | null;
+  note: string | null;
+  wd2CheckStatus: "pending" | "valid" | "issue";
+  wd2CheckNote: string | null;
+  payments: { fakultas: Payment; univ: Payment };
+};
+
+type Notification = { id: string; title: string; body: string | null; readAt: string | null };
+
+type Preview =
+  | { type: "payment"; payment: NonNullable<Payment>; who: string }
+  | { type: "photo"; src: string; title: string }
+  | null;
+
+const kindLabel: Record<Kind, string> = {
+  fakultas: "Wisuda Pelepasan Fakultas",
+  univ: "Wisuda Univ",
 };
 
 export default function Wd2ReviewPage() {
   const router = useRouter();
-  const [submissions, setSubmissions] = useState<Submission[]>([]);
+  const [tab, setTab] = useState<"queue" | "pickups">("queue");
+  const [reviewerType, setReviewerType] = useState<"wd2" | "admin">("wd2");
+  const [queue, setQueue] = useState<QueueItem[]>([]);
+  const [pickups, setPickups] = useState<PickupItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [actionId, setActionId] = useState<string | null>(null);
-  const [rejectingId, setRejectingId] = useState<string | null>(null);
-  const [rejectReason, setRejectReason] = useState("");
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
   const [toast, setToast] = useState<{ msg: string; type: "ok" | "err" } | null>(null);
 
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unread, setUnread] = useState(0);
-  const [showNotif, setShowNotif] = useState(false);
+  const [sheet, setSheet] = useState<"notif" | null>(null);
+  const [preview, setPreview] = useState<Preview>(null);
 
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [bulkBusy, setBulkBusy] = useState(false);
-  const [previewId, setPreviewId] = useState<string | null>(null);
+  const [rejectTarget, setRejectTarget] = useState<{ type: "payment" | "pickup"; id: string } | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
 
   const showToast = (msg: string, type: "ok" | "err" = "ok") => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3500);
   };
 
-  const fetchSubmissions = useCallback(async () => {
-    const res = await fetch("/api/wd2/submissions?status=pending", { credentials: "include" });
+  const fetchQueue = useCallback(async () => {
+    const res = await fetch("/api/wd2/submissions", { credentials: "include" });
     if (res.status === 401) {
       router.replace("/wd2/login");
       return;
     }
     const data = await res.json();
-    setSubmissions(data.submissions ?? []);
+    setQueue(data.queue ?? []);
+    if (data.reviewer?.type) setReviewerType(data.reviewer.type);
   }, [router]);
+
+  const fetchPickups = useCallback(async () => {
+    const res = await fetch("/api/wd2/pickups?status=pending", { credentials: "include" });
+    if (!res.ok) return;
+    const data = await res.json();
+    setPickups(data.pickups ?? []);
+  }, []);
 
   const fetchNotifications = useCallback(async () => {
     const res = await fetch("/api/wd2/notifications", { credentials: "include" });
@@ -72,116 +111,121 @@ export default function Wd2ReviewPage() {
 
   useEffect(() => {
     setLoading(true);
-    Promise.all([fetchSubmissions(), fetchNotifications()]).finally(() => setLoading(false));
-  }, [fetchSubmissions, fetchNotifications]);
+    Promise.all([fetchQueue(), fetchPickups(), fetchNotifications()]).finally(() => setLoading(false));
+  }, [fetchQueue, fetchPickups, fetchNotifications]);
 
   const handleLogout = async () => {
+    if (reviewerType === "admin") {
+      router.push("/dashboard");
+      return;
+    }
     await fetch("/api/wd2/logout", { method: "POST", credentials: "include" });
     router.replace("/wd2/login");
   };
 
-  const approveOne = async (id: string): Promise<{ ok: boolean; message?: string }> => {
-    const res = await fetch(`/api/wd2/submissions/${id}/approve`, {
-      method: "POST",
-      credentials: "include",
-    });
-    const data = await res.json();
-    if (!res.ok) return { ok: false, message: data.message ?? "Gagal menyetujui" };
-    return { ok: true };
+  const approvePaymentById = async (id: string): Promise<boolean> => {
+    const res = await fetch(`/api/wd2/payments/${id}/approve`, { method: "POST", credentials: "include" });
+    return res.ok;
   };
 
   const handleApprove = async (id: string) => {
-    setActionId(id);
+    setBusyId(id);
     try {
-      const result = await approveOne(id);
-      if (!result.ok) throw new Error(result.message);
-      setSubmissions((prev) => prev.filter((s) => s.id !== id));
-      setSelected((prev) => {
-        const next = new Set(prev);
-        next.delete(id);
-        return next;
-      });
-      if (previewId === id) setPreviewId(null);
+      if (!(await approvePaymentById(id))) throw new Error("Gagal menyetujui");
+      await fetchQueue();
+      setPreview(null);
       showToast("Disetujui.");
     } catch (err) {
       showToast((err as Error).message, "err");
     } finally {
-      setActionId(null);
+      setBusyId(null);
     }
   };
 
   const handleBulkApprove = async () => {
-    const ids = Array.from(selected);
-    if (ids.length === 0) return;
+    const items = queue.filter((q) => selected.has(q.submissionId));
+    const paymentIds = items.flatMap((q) =>
+      [q.payments.fakultas, q.payments.univ].filter((p): p is NonNullable<Payment> => p?.status === "pending").map((p) => p.id)
+    );
+    if (!paymentIds.length) return;
     setBulkBusy(true);
-    let success = 0;
-    let failed = 0;
-    for (const id of ids) {
-      const result = await approveOne(id);
-      if (result.ok) success++;
-      else failed++;
+    let ok = 0;
+    let fail = 0;
+    for (const id of paymentIds) {
+      if (await approvePaymentById(id)) ok++;
+      else fail++;
     }
-    // Refetch rather than locally filter, since some approvals may have failed mid-loop
-    await fetchSubmissions();
+    await fetchQueue();
     setSelected(new Set());
     setBulkBusy(false);
-    showToast(
-      failed > 0
-        ? `${success} disetujui, ${failed} gagal.`
-        : `${success} submission disetujui.`,
-      failed > 0 ? "err" : "ok"
-    );
+    showToast(fail ? `${ok} bukti disetujui, ${fail} gagal.` : `${ok} bukti disetujui.`, fail ? "err" : "ok");
   };
 
-  const handleReject = async (id: string) => {
-    if (!rejectReason.trim()) return;
-    setActionId(id);
+  const submitReject = async () => {
+    if (!rejectTarget || !rejectReason.trim()) return;
+    setBusyId(rejectTarget.id);
     try {
-      const res = await fetch(`/api/wd2/submissions/${id}/reject`, {
+      const url =
+        rejectTarget.type === "payment"
+          ? `/api/wd2/payments/${rejectTarget.id}/reject`
+          : `/api/wd2/pickups/${rejectTarget.id}/check`;
+      const body =
+        rejectTarget.type === "payment"
+          ? { reason: rejectReason }
+          : { outcome: "issue", note: rejectReason };
+      const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ reason: rejectReason }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.message ?? "Gagal menolak");
-      setSubmissions((prev) => prev.filter((s) => s.id !== id));
-      setSelected((prev) => {
-        const next = new Set(prev);
-        next.delete(id);
-        return next;
-      });
-      setRejectingId(null);
+      if (!res.ok) throw new Error(data.message ?? "Gagal menyimpan");
+      await Promise.all([fetchQueue(), fetchPickups()]);
+      setRejectTarget(null);
       setRejectReason("");
-      if (previewId === id) setPreviewId(null);
-      showToast("Submission ditolak.");
+      setPreview(null);
+      showToast(rejectTarget.type === "payment" ? "Bukti ditolak." : "Ditandai bermasalah.");
     } catch (err) {
       showToast((err as Error).message, "err");
     } finally {
-      setActionId(null);
+      setBusyId(null);
     }
   };
 
-  const toggleSelect = (id: string) => {
+  const markPickupValid = async (id: string) => {
+    setBusyId(id);
+    try {
+      const res = await fetch(`/api/wd2/pickups/${id}/check`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ outcome: "valid" }),
+      });
+      if (!res.ok) throw new Error("Gagal memvalidasi");
+      await fetchPickups();
+      showToast("Ditandai valid.");
+    } catch (err) {
+      showToast((err as Error).message, "err");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const toggleSelect = (id: string) =>
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
-  };
 
-  const toggleSelectAll = () => {
-    setSelected((prev) =>
-      prev.size === submissions.length ? new Set() : new Set(submissions.map((s) => s.id))
-    );
-  };
-
-  const toggleNotif = async () => {
-    setShowNotif((v) => !v);
-    if (!showNotif) {
+  const openNotifications = async () => {
+    setSheet("notif");
+    const unreadItems = notifications.filter((n) => !n.readAt);
+    if (unreadItems.length) {
       await Promise.all(
-        notifications.filter((n) => !n.readAt).map((n) =>
+        unreadItems.map((n) =>
           fetch(`/api/wd2/notifications/${n.id}/read`, { method: "PATCH", credentials: "include" })
         )
       );
@@ -190,210 +234,302 @@ export default function Wd2ReviewPage() {
     }
   };
 
-  const previewSubmission = submissions.find((s) => s.id === previewId) ?? null;
-  const allSelected = submissions.length > 0 && selected.size === submissions.length;
+  const proofThumb = (src: string | null, title: string, onClick?: () => void) =>
+    src ? (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={src}
+        alt={title}
+        onClick={onClick ?? (() => setPreview({ type: "photo", src, title }))}
+        className="w-20 h-20 object-cover rounded-2xl border border-white/80 shadow-sm cursor-zoom-in shrink-0"
+      />
+    ) : (
+      <div className="w-20 h-20 rounded-2xl glass-inset flex items-center justify-center text-[10px] text-slate-400 shrink-0">
+        Tidak ada
+      </div>
+    );
+
+  const allSelected = queue.length > 0 && selected.size === queue.length;
+  const previewPayment = preview?.type === "payment" ? preview : null;
 
   return (
-    <div className="max-w-2xl mx-auto px-5 py-6 space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <ShieldCheck className="text-[#1B4332]" size={22} />
-          <h1 className="text-base font-bold text-[#1A1A2E]">Review Pembayaran Wisuda</h1>
+    <div className="glass-bg">
+      <div className="max-w-2xl mx-auto px-5 pt-6 space-y-4">
+        <div>
+          <p className="text-sm text-slate-500">{reviewerType === "admin" ? "Admin (akses penuh)" : "Reviewer"}</p>
+          <h1 className="glass-title">{tab === "queue" ? "Review Bukti Bayar" : "Verifikasi Susulan"}</h1>
         </div>
-        <div className="flex items-center gap-1">
-          <div className="relative">
-            <button onClick={toggleNotif} className="p-2 rounded-xl hover:bg-white relative">
-              <Bell size={18} className="text-slate-500" />
-              {unread > 0 && (
-                <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-rose-500 text-white text-[10px] flex items-center justify-center">
-                  {unread}
-                </span>
-              )}
-            </button>
-            {showNotif && (
-              <div className="absolute right-0 mt-2 w-72 bg-white rounded-2xl border border-slate-100 shadow-lg z-10 max-h-80 overflow-y-auto">
-                {notifications.length === 0 ? (
-                  <p className="text-xs text-slate-400 text-center py-6">Belum ada notifikasi.</p>
-                ) : (
-                  notifications.map((n) => (
-                    <div key={n.id} className="px-4 py-3 border-b border-slate-50 last:border-0">
-                      <p className="text-xs font-semibold text-[#1A1A2E]">{n.title}</p>
-                      {n.body && <p className="text-xs text-slate-500 mt-0.5">{n.body}</p>}
-                    </div>
-                  ))
-                )}
-              </div>
-            )}
+
+        {toast && (
+          <div className={`glass-card !rounded-2xl px-4 py-3 text-sm ${toast.type === "err" ? "text-rose-700" : "text-emerald-700"}`}>
+            {toast.msg}
           </div>
-          <button onClick={handleLogout} className="p-2 rounded-xl hover:bg-white text-slate-500">
-            <LogOut size={18} />
-          </button>
-        </div>
-      </div>
+        )}
 
-      {toast && (
-        <div className={`rounded-xl border px-4 py-3 text-sm ${
-          toast.type === "err" ? "border-rose-200 bg-rose-50 text-rose-700" : "border-emerald-200 bg-emerald-50 text-emerald-700"
-        }`}>
-          {toast.msg}
-        </div>
-      )}
+        {loading ? (
+          <div className="flex justify-center py-16">
+            <Loader2 className="animate-spin text-[#40916C]" size={26} />
+          </div>
+        ) : tab === "queue" ? (
+          <>
+            <div className="glass-card !rounded-2xl px-4 py-3 flex items-center justify-between gap-3">
+              <button
+                onClick={() => setSelected(allSelected ? new Set() : new Set(queue.map((q) => q.submissionId)))}
+                disabled={!queue.length}
+                className="flex items-center gap-2 text-sm text-slate-700 disabled:opacity-40"
+              >
+                {allSelected ? <CheckSquare size={18} className="text-[#1B4332]" /> : <Square size={18} />}
+                <span>
+                  <b>{queue.length}</b> mahasiswa menunggu
+                </span>
+              </button>
+              {selected.size > 0 && (
+                <button
+                  onClick={handleBulkApprove}
+                  disabled={bulkBusy}
+                  className="glass-btn glass-btn-primary !min-h-10 px-4 text-sm flex items-center gap-1.5"
+                >
+                  {bulkBusy ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
+                  Setujui ({selected.size})
+                </button>
+              )}
+            </div>
 
-      <div className="rounded-2xl bg-white border border-slate-100 px-5 py-3 flex items-center justify-between gap-3">
-        <button
-          type="button"
-          onClick={toggleSelectAll}
-          disabled={submissions.length === 0}
-          className="flex items-center gap-2 text-sm text-slate-600 disabled:opacity-40"
-        >
-          {allSelected ? <CheckSquare size={16} className="text-[#1B4332]" /> : <Square size={16} />}
-          <span>
-            <span className="font-bold text-[#1A1A2E]">{submissions.length}</span> submission menunggu review
-          </span>
-        </button>
-        {selected.size > 0 && (
-          <button
-            type="button"
-            onClick={handleBulkApprove}
-            disabled={bulkBusy}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1B4332] text-white text-xs font-semibold hover:bg-[#40916C] disabled:opacity-50"
-          >
-            {bulkBusy ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
-            Setujui Terpilih ({selected.size})
-          </button>
+            {queue.length === 0 && (
+              <GlassCard>
+                <div className="text-center py-6 text-slate-500 text-sm">
+                  <Inbox className="mx-auto mb-2 text-slate-400" /> Tidak ada bukti yang menunggu review.
+                </div>
+              </GlassCard>
+            )}
+
+            {queue.map((q) => (
+              <GlassCard key={q.submissionId}>
+                <div className="flex items-start gap-3 mb-4">
+                  <button onClick={() => toggleSelect(q.submissionId)} className="mt-0.5" aria-label="Pilih">
+                    {selected.has(q.submissionId) ? (
+                      <CheckSquare size={20} className="text-[#1B4332]" />
+                    ) : (
+                      <Square size={20} className="text-slate-400" />
+                    )}
+                  </button>
+                  <div className="min-w-0">
+                    <p className="font-bold text-[#11291f]">{q.mahasiswaName}</p>
+                    <p className="text-xs text-slate-500">
+                      {q.mahasiswaNpm} {q.mahasiswaEmail ? `• ${q.mahasiswaEmail}` : ""}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  {(["fakultas", "univ"] as Kind[]).map((kind) => {
+                    const p = q.payments[kind];
+                    return (
+                      <div key={kind} className="glass-inset p-3 flex gap-3 items-center">
+                        {proofThumb(p?.proof ?? null, kindLabel[kind], p ? () => setPreview({ type: "payment", payment: p, who: q.mahasiswaName }) : undefined)}
+                        <div className="flex-1 min-w-0">
+                          <Eyebrow>{kindLabel[kind]}</Eyebrow>
+                          {!p || p.status === "none" ? (
+                            <StatusPill tone="muted">Belum diunggah</StatusPill>
+                          ) : p.status === "pending" ? (
+                            <div className="flex gap-2 mt-1">
+                              <button
+                                onClick={() => handleApprove(p.id)}
+                                disabled={busyId === p.id}
+                                className="glass-btn glass-btn-primary !min-h-10 px-4 text-sm"
+                              >
+                                Setujui
+                              </button>
+                              <button
+                                onClick={() => setRejectTarget({ type: "payment", id: p.id })}
+                                className="glass-btn glass-btn-danger !min-h-10 px-4 text-sm"
+                              >
+                                Tolak
+                              </button>
+                            </div>
+                          ) : p.status === "approved" ? (
+                            <StatusPill tone="ok">Disetujui</StatusPill>
+                          ) : p.status === "desk" ? (
+                            <StatusPill tone="info">Diverifikasi admin</StatusPill>
+                          ) : (
+                            <StatusPill tone="bad">Ditolak</StatusPill>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </GlassCard>
+            ))}
+          </>
+        ) : (
+          <>
+            {pickups.length === 0 && (
+              <GlassCard>
+                <div className="text-center py-6 text-slate-500 text-sm">
+                  <ClipboardCheck className="mx-auto mb-2 text-slate-400" /> Tidak ada serah-terima yang perlu diverifikasi.
+                </div>
+              </GlassCard>
+            )}
+            {pickups.map((pk) => (
+              <GlassCard key={pk.id}>
+                <div className="mb-3">
+                  <p className="font-bold text-[#11291f]">{pk.mahasiswaName}</p>
+                  <p className="text-xs text-slate-500">
+                    {pk.mahasiswaNpm} • {new Date(pk.handedAt).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" })}
+                  </p>
+                  <div className="flex gap-2 mt-2">
+                    {pk.undanganGiven && <StatusPill tone="muted">Undangan</StatusPill>}
+                    {pk.togaGiven && <StatusPill tone="muted">Toga</StatusPill>}
+                  </div>
+                </div>
+                <div className="flex gap-3 mb-3 overflow-x-auto pb-1">
+                  <div className="text-center">
+                    {proofThumb(pk.payments.fakultas?.proof ?? null, "Bukti fakultas")}
+                    <p className="text-[10px] text-slate-500 mt-1">Fakultas</p>
+                  </div>
+                  <div className="text-center">
+                    {proofThumb(pk.payments.univ?.proof ?? null, "Bukti univ")}
+                    <p className="text-[10px] text-slate-500 mt-1">Univ</p>
+                  </div>
+                  <div className="text-center">
+                    {proofThumb(pk.handoverPhoto, "Foto serah-terima")}
+                    <p className="text-[10px] text-slate-500 mt-1">Serah-terima</p>
+                  </div>
+                </div>
+                {pk.note && <p className="glass-inset p-3 text-sm text-slate-600 mb-3">Catatan admin: {pk.note}</p>}
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={() => markPickupValid(pk.id)}
+                    disabled={busyId === pk.id}
+                    className="glass-btn glass-btn-primary"
+                  >
+                    Valid
+                  </button>
+                  <button
+                    onClick={() => setRejectTarget({ type: "pickup", id: pk.id })}
+                    className="glass-btn glass-btn-danger"
+                  >
+                    Bermasalah
+                  </button>
+                </div>
+              </GlassCard>
+            ))}
+          </>
         )}
       </div>
 
-      {loading ? (
-        <div className="flex justify-center py-10">
-          <Loader2 className="animate-spin text-[#40916C]" size={24} />
-        </div>
-      ) : submissions.length === 0 ? (
-        <p className="text-sm text-slate-400 text-center py-10">Tidak ada submission yang menunggu review.</p>
-      ) : (
-        <div className="space-y-3">
-          {submissions.map((s) => (
-            <div key={s.id} className="rounded-2xl bg-white border border-slate-100 p-4 shadow-sm">
-              <div className="flex gap-4">
-                <button
-                  type="button"
-                  onClick={() => toggleSelect(s.id)}
-                  className="shrink-0 mt-1"
-                  title="Pilih untuk approve massal"
-                >
-                  {selected.has(s.id) ? (
-                    <CheckSquare size={18} className="text-[#1B4332]" />
-                  ) : (
-                    <Square size={18} className="text-slate-300" />
-                  )}
-                </button>
-                {s.paymentProof && (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={s.paymentProof}
-                    alt="Bukti pembayaran"
-                    onClick={() => setPreviewId(s.id)}
-                    className="w-24 h-24 object-cover rounded-xl border border-slate-100 shrink-0 cursor-zoom-in hover:opacity-90 transition-opacity"
-                  />
-                )}
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-bold text-[#1A1A2E]">{s.mahasiswaName}</p>
-                  <p className="text-xs text-slate-400">{s.mahasiswaNpm} • {s.mahasiswaEmail}</p>
-                  <div className="flex items-center gap-2 mt-3">
-                    <button
-                      onClick={() => handleApprove(s.id)}
-                      disabled={actionId === s.id}
-                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[#1B4332] text-white text-xs font-semibold hover:bg-[#40916C] disabled:opacity-50"
-                    >
-                      <CheckCircle2 size={13} /> Setujui
-                    </button>
-                    <button
-                      onClick={() => setRejectingId(rejectingId === s.id ? null : s.id)}
-                      disabled={actionId === s.id}
-                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-rose-200 text-rose-600 text-xs font-semibold hover:border-rose-300 disabled:opacity-50"
-                    >
-                      <XCircle size={13} /> Tolak
-                    </button>
-                  </div>
-                </div>
-              </div>
-              {rejectingId === s.id && (
-                <div className="mt-3 pt-3 border-t border-slate-100 space-y-2">
-                  <textarea
-                    value={rejectReason}
-                    onChange={(e) => setRejectReason(e.target.value)}
-                    placeholder="Alasan penolakan..."
-                    rows={2}
-                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-[#1B4332] focus:outline-none"
-                  />
-                  <button
-                    onClick={() => handleReject(s.id)}
-                    disabled={!rejectReason.trim() || actionId === s.id}
-                    className="px-4 py-1.5 rounded-lg bg-rose-600 text-white text-xs font-semibold hover:bg-rose-700 disabled:opacity-50"
-                  >
-                    Kirim Penolakan
-                  </button>
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
+      <nav className="glass-bar">
+        <button className={tab === "queue" ? "is-active" : ""} onClick={() => setTab("queue")}>
+          <Inbox size={20} />
+          Menunggu{queue.length ? ` (${queue.length})` : ""}
+        </button>
+        <button className={tab === "pickups" ? "is-active" : ""} onClick={() => setTab("pickups")}>
+          <ClipboardCheck size={20} />
+          Susulan{pickups.length ? ` (${pickups.length})` : ""}
+        </button>
+        {reviewerType === "wd2" && (
+          <button onClick={openNotifications}>
+            <Bell size={20} />
+            {unread > 0 && (
+              <span className="absolute top-1 right-[28%] min-w-4 h-4 px-1 rounded-full bg-rose-500 text-white text-[10px] flex items-center justify-center">
+                {unread}
+              </span>
+            )}
+            Notifikasi
+          </button>
+        )}
+        <button onClick={handleLogout}>
+          <LogOut size={20} />
+          {reviewerType === "admin" ? "Admin" : "Keluar"}
+        </button>
+      </nav>
 
-      {/* Image preview lightbox — keeps approve/reject reachable */}
-      {previewSubmission && (
-        <div
-          className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-5"
-          onClick={() => setPreviewId(null)}
-        >
-          <div
-            className="bg-white rounded-2xl overflow-hidden max-w-lg w-full max-h-[90vh] flex flex-col"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
-              <div>
-                <p className="text-sm font-bold text-[#1A1A2E]">{previewSubmission.mahasiswaName}</p>
-                <p className="text-xs text-slate-400">
-                  {previewSubmission.mahasiswaNpm} • {previewSubmission.mahasiswaEmail}
-                </p>
+      <GlassSheet open={sheet === "notif"} onClose={() => setSheet(null)}>
+        <h3 className="text-lg font-bold text-[#11291f] mb-4">Notifikasi</h3>
+        {notifications.length === 0 ? (
+          <p className="text-sm text-slate-500">Belum ada notifikasi.</p>
+        ) : (
+          <div className="space-y-2">
+            {notifications.map((n) => (
+              <div key={n.id} className="glass-inset p-3">
+                <p className="text-sm font-semibold text-[#11291f]">{n.title}</p>
+                {n.body && <p className="text-xs text-slate-600 mt-0.5">{n.body}</p>}
               </div>
-              <button onClick={() => setPreviewId(null)} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500">
-                <X size={18} />
-              </button>
-            </div>
-            <div className="overflow-auto flex-1 bg-slate-50 flex items-center justify-center p-2">
-              {previewSubmission.paymentProof && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={previewSubmission.paymentProof}
-                  alt="Bukti pembayaran"
-                  className="max-w-full max-h-[65vh] object-contain rounded-lg"
-                />
-              )}
-            </div>
-            <div className="flex items-center gap-2 px-4 py-3 border-t border-slate-100">
-              <button
-                onClick={() => handleApprove(previewSubmission.id)}
-                disabled={actionId === previewSubmission.id}
-                className="flex-1 inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg bg-[#1B4332] text-white text-sm font-semibold hover:bg-[#40916C] disabled:opacity-50"
-              >
-                {actionId === previewSubmission.id ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
-                Setujui
-              </button>
-              <button
-                onClick={() => {
-                  setRejectingId(previewSubmission.id);
-                  setPreviewId(null);
-                }}
-                disabled={actionId === previewSubmission.id}
-                className="flex-1 inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg border border-rose-200 text-rose-600 text-sm font-semibold hover:border-rose-300 disabled:opacity-50"
-              >
-                <XCircle size={14} /> Tolak
-              </button>
-            </div>
+            ))}
           </div>
+        )}
+      </GlassSheet>
+
+      {/* Image preview — approve/reject stay reachable for payment proofs */}
+      <GlassSheet open={preview !== null} onClose={() => setPreview(null)}>
+        {preview?.type === "photo" && (
+          <>
+            <h3 className="text-base font-bold text-[#11291f] mb-3">{preview.title}</h3>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={preview.src} alt={preview.title} className="w-full max-h-[65dvh] object-contain rounded-2xl" />
+          </>
+        )}
+        {previewPayment && (
+          <>
+            <h3 className="text-base font-bold text-[#11291f]">{previewPayment.who}</h3>
+            <p className="text-xs text-slate-500 mb-3">{kindLabel[previewPayment.payment.kind]}</p>
+            {previewPayment.payment.proof && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={previewPayment.payment.proof}
+                alt="Bukti pembayaran"
+                className="w-full max-h-[55dvh] object-contain rounded-2xl mb-4"
+              />
+            )}
+            {previewPayment.payment.status === "pending" && (
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  onClick={() => handleApprove(previewPayment.payment.id)}
+                  disabled={busyId === previewPayment.payment.id}
+                  className="glass-btn glass-btn-primary"
+                >
+                  Setujui
+                </button>
+                <button
+                  onClick={() => {
+                    setRejectTarget({ type: "payment", id: previewPayment.payment.id });
+                    setPreview(null);
+                  }}
+                  className="glass-btn glass-btn-danger"
+                >
+                  Tolak
+                </button>
+              </div>
+            )}
+          </>
+        )}
+      </GlassSheet>
+
+      <GlassSheet open={rejectTarget !== null} onClose={() => setRejectTarget(null)}>
+        <h3 className="text-lg font-bold text-[#11291f] mb-1">
+          {rejectTarget?.type === "pickup" ? "Tandai Bermasalah" : "Tolak Bukti"}
+        </h3>
+        <p className="text-sm text-slate-500 mb-4">Alasan wajib diisi dan akan terlihat oleh {rejectTarget?.type === "pickup" ? "admin" : "mahasiswa"}.</p>
+        <textarea
+          value={rejectReason}
+          onChange={(e) => setRejectReason(e.target.value)}
+          placeholder="Tulis alasan..."
+          className="glass-input mb-4"
+        />
+        <div className="grid grid-cols-2 gap-3">
+          <button onClick={() => setRejectTarget(null)} className="glass-btn glass-btn-soft">
+            Batal
+          </button>
+          <button
+            onClick={submitReject}
+            disabled={!rejectReason.trim() || busyId === rejectTarget?.id}
+            className="glass-btn glass-btn-danger flex items-center justify-center gap-1"
+          >
+            <XCircle size={15} /> Kirim
+          </button>
         </div>
-      )}
+      </GlassSheet>
     </div>
   );
 }

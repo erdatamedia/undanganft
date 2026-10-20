@@ -4,24 +4,33 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Bell,
+  CalendarCheck,
   CheckCircle2,
   Clock,
   GraduationCap,
+  Home,
   ListOrdered,
   LogOut,
+  QrCode,
+  ShieldCheck,
   Upload,
-  X,
   XCircle,
 } from "lucide-react";
 import { InstallPrompt } from "@/components/install-prompt";
+import { Eyebrow, GlassCard, GlassSheet, StatusPill } from "@/components/glass";
+
+type PaymentKind = "fakultas" | "univ";
+type PaymentView = {
+  id: string;
+  status: "none" | "pending" | "approved" | "rejected" | "desk";
+  rejectReason: string | null;
+  source: "mahasiswa" | "admin_desk";
+} | null;
 
 type Submission = {
   id: string;
-  yudisiumConfirmed: boolean;
-  paymentProof: string | null;
-  paymentStatus: "none" | "pending" | "approved" | "rejected";
-  paymentRejectReason: string | null;
-  wisudaConfirmed: boolean;
+  yudisiumStatus: "pending" | "hadir" | "tidak_hadir";
+  yudisiumAbsentReason: string | null;
 };
 
 type EventData = {
@@ -32,6 +41,8 @@ type EventData = {
   yudisiumVenue?: string | null;
   yudisiumDresscode?: string | null;
   wisudaDresscode?: string | null;
+  univSchedule?: string | null;
+  univVenue?: string | null;
 };
 
 type Notification = {
@@ -45,7 +56,6 @@ type Notification = {
 type RundownInfo = {
   order: number;
   timeStart: string | null;
-  timeEnd: string | null;
   durationMinutes: number | null;
   title: string;
 };
@@ -55,6 +65,12 @@ export default function MahasiswaDashboardPage() {
   const [mahasiswa, setMahasiswa] = useState<{ name: string; npm: string } | null>(null);
   const [event, setEvent] = useState<EventData | null>(null);
   const [submission, setSubmission] = useState<Submission | null>(null);
+  const [payments, setPayments] = useState<{ fakultas: PaymentView; univ: PaymentView }>({
+    fakultas: null,
+    univ: null,
+  });
+  const [pickup, setPickup] = useState<{ handedAt: string; undanganGiven: boolean; togaGiven: boolean } | null>(null);
+  const [inviteToken, setInviteToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -62,13 +78,11 @@ export default function MahasiswaDashboardPage() {
 
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unread, setUnread] = useState(0);
-  const [showNotif, setShowNotif] = useState(false);
-
+  const [sheet, setSheet] = useState<"notif" | "rundown" | "absent" | null>(null);
   const [rundown, setRundown] = useState<RundownInfo[]>([]);
-  const [showRundown, setShowRundown] = useState(false);
-  const [inviteToken, setInviteToken] = useState<string | null>(null);
+  const [absentReason, setAbsentReason] = useState("");
 
-  const fileRef = useRef<HTMLInputElement | null>(null);
+  const fileRefs = useRef<Record<PaymentKind, HTMLInputElement | null>>({ fakultas: null, univ: null });
 
   const showToast = (msg: string, type: "ok" | "err" = "ok") => {
     setToast({ msg, type });
@@ -89,6 +103,8 @@ export default function MahasiswaDashboardPage() {
     setEvent(data.event);
     setSubmission(data.submission);
     setMahasiswa(data.mahasiswa);
+    setPayments(data.payments ?? { fakultas: null, univ: null });
+    setPickup(data.pickup ?? null);
     setInviteToken(data.inviteToken ?? null);
   }, [router]);
 
@@ -117,17 +133,21 @@ export default function MahasiswaDashboardPage() {
     router.replace("/mahasiswa/login");
   };
 
-  const handleConfirmYudisium = async () => {
+  const sendYudisium = async (attending: boolean, reason?: string) => {
     setBusy(true);
     try {
       const res = await fetch("/api/mahasiswa/submission/yudisium", {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
         credentials: "include",
+        body: JSON.stringify({ attending, reason }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.message ?? "Gagal konfirmasi");
+      if (!res.ok) throw new Error(data.message ?? "Gagal menyimpan");
       setSubmission(data.submission);
-      showToast("Kehadiran yudisium dikonfirmasi.");
+      setSheet(null);
+      setAbsentReason("");
+      showToast(attending ? "Kehadiran yudisium dikonfirmasi." : "Ketidakhadiran dicatat.");
     } catch (err) {
       showToast((err as Error).message, "err");
     } finally {
@@ -135,12 +155,13 @@ export default function MahasiswaDashboardPage() {
     }
   };
 
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleUpload = async (kind: PaymentKind, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     setBusy(true);
     try {
       const formData = new FormData();
+      formData.append("kind", kind);
       formData.append("photo", file);
       const res = await fetch("/api/mahasiswa/submission/payment-proof", {
         method: "POST",
@@ -149,21 +170,23 @@ export default function MahasiswaDashboardPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message ?? "Gagal mengunggah");
-      setSubmission(data.submission);
-      showToast("Bukti pembayaran terkirim. Menunggu review WD2.");
+      await fetchSubmission();
+      showToast("Bukti pembayaran terkirim. Menunggu verifikasi.");
     } catch (err) {
       showToast((err as Error).message, "err");
     } finally {
       setBusy(false);
-      if (fileRef.current) fileRef.current.value = "";
+      const input = fileRefs.current[kind];
+      if (input) input.value = "";
     }
   };
 
-  const toggleNotif = async () => {
-    setShowNotif((v) => !v);
-    if (!showNotif) {
+  const openNotifications = async () => {
+    setSheet("notif");
+    const unreadItems = notifications.filter((n) => !n.readAt);
+    if (unreadItems.length) {
       await Promise.all(
-        notifications.filter((n) => !n.readAt).map((n) =>
+        unreadItems.map((n) =>
           fetch(`/api/mahasiswa/notifications/${n.id}/read`, { method: "PATCH", credentials: "include" })
         )
       );
@@ -172,223 +195,300 @@ export default function MahasiswaDashboardPage() {
     }
   };
 
+  const renderPayment = (kind: PaymentKind) => {
+    const p = payments[kind];
+    const status = p?.status ?? "none";
+    const uploadable = status === "none" || status === "rejected";
+    return (
+      <div className="space-y-3">
+        {status === "pending" && (
+          <StatusPill tone="wait">
+            <Clock size={13} /> Menunggu verifikasi WD2
+          </StatusPill>
+        )}
+        {status === "approved" && (
+          <StatusPill tone="ok">
+            <CheckCircle2 size={13} /> Disetujui
+          </StatusPill>
+        )}
+        {status === "desk" && (
+          <StatusPill tone="info">
+            <ShieldCheck size={13} /> Diverifikasi admin di meja · validasi WD2 menyusul
+          </StatusPill>
+        )}
+        {status === "rejected" && (
+          <div className="glass-inset p-3 flex items-start gap-2 text-rose-700">
+            <XCircle size={16} className="shrink-0 mt-0.5" />
+            <span className="text-sm">
+              Ditolak: {p?.rejectReason}. Silakan unggah ulang bukti yang valid.
+            </span>
+          </div>
+        )}
+        {uploadable && (
+          <>
+            <button
+              onClick={() => fileRefs.current[kind]?.click()}
+              disabled={busy}
+              className="glass-btn glass-btn-soft w-full flex items-center justify-center gap-2 border-dashed"
+            >
+              <Upload size={16} /> Unggah Foto Bukti Bayar
+            </button>
+            <input
+              ref={(el) => {
+                fileRefs.current[kind] = el;
+              }}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => handleUpload(kind, e)}
+            />
+            <p className="text-[11px] text-slate-500 text-center">Format foto, maksimal 2MB.</p>
+          </>
+        )}
+      </div>
+    );
+  };
+
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="animate-spin h-6 w-6 border-2 border-[#40916C] border-t-transparent rounded-full" />
+      <div className="glass-bg flex items-center justify-center">
+        <div className="animate-spin h-7 w-7 border-2 border-[#40916C] border-t-transparent rounded-full" />
       </div>
     );
   }
 
   if (notFound) {
     return (
-      <div className="flex items-center justify-center min-h-screen px-5 text-center">
-        <p className="text-sm text-slate-500">
-          Tidak ada acara aktif yang membutuhkan konfirmasi Anda saat ini.
-        </p>
+      <div className="glass-bg flex items-center justify-center px-6 text-center">
+        <GlassCard>
+          <p className="text-sm text-slate-600">Tidak ada acara aktif yang membutuhkan konfirmasi Anda saat ini.</p>
+        </GlassCard>
       </div>
     );
   }
 
+  const invitationReady = payments.fakultas?.status === "approved" || payments.fakultas?.status === "desk";
+
   return (
-    <div className="max-w-sm mx-auto px-5 py-6 space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <GraduationCap className="text-[#1B4332]" size={22} />
+    <div className="glass-bg">
+      <div className="max-w-md mx-auto px-5 pt-6 space-y-4">
+        <div className="flex items-start justify-between gap-3">
           <div>
-            <p className="text-sm font-bold text-[#1A1A2E]">{mahasiswa?.name}</p>
-            <p className="text-xs text-slate-400">{mahasiswa?.npm}</p>
+            <p className="text-sm text-slate-500">Halo,</p>
+            <h1 className="glass-title">{mahasiswa?.name}</h1>
+            <p className="text-xs text-slate-500 mt-1">{mahasiswa?.npm}</p>
+          </div>
+          <div className="glass-card !rounded-2xl p-2.5">
+            <GraduationCap className="text-[#1B4332]" size={22} />
           </div>
         </div>
-        <div className="flex items-center gap-1">
-          <div className="relative">
-            <button
-              onClick={toggleNotif}
-              className="p-2 rounded-xl hover:bg-white relative"
-            >
-              <Bell size={18} className="text-slate-500" />
-              {unread > 0 && (
-                <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-rose-500 text-white text-[10px] flex items-center justify-center">
-                  {unread}
-                </span>
-              )}
-            </button>
-            {showNotif && (
-              <div className="absolute right-0 mt-2 w-72 bg-white rounded-2xl border border-slate-100 shadow-lg z-10 max-h-80 overflow-y-auto">
-                {notifications.length === 0 ? (
-                  <p className="text-xs text-slate-400 text-center py-6">Belum ada notifikasi.</p>
-                ) : (
-                  notifications.map((n) => (
-                    <div key={n.id} className="px-4 py-3 border-b border-slate-50 last:border-0">
-                      <p className="text-xs font-semibold text-[#1A1A2E]">{n.title}</p>
-                      {n.body && <p className="text-xs text-slate-500 mt-0.5">{n.body}</p>}
-                    </div>
-                  ))
-                )}
-              </div>
-            )}
-          </div>
-          <button onClick={handleLogout} className="p-2 rounded-xl hover:bg-white text-slate-500">
-            <LogOut size={18} />
-          </button>
-        </div>
-      </div>
 
-      <InstallPrompt />
+        <InstallPrompt />
 
-      {toast && (
-        <div className={`rounded-xl border px-4 py-3 text-sm ${
-          toast.type === "err" ? "border-rose-200 bg-rose-50 text-rose-700" : "border-emerald-200 bg-emerald-50 text-emerald-700"
-        }`}>
-          {toast.msg}
-        </div>
-      )}
-
-      {event && (
-        <div className="rounded-2xl bg-white border border-slate-100 p-5 shadow-sm">
-          <p className="text-xs font-bold uppercase tracking-[2px] text-[#40916C] mb-2">Acara</p>
-          <h2 className="text-base font-bold text-[#1A1A2E] mb-3">{event.name}</h2>
-          {rundown.length > 0 && (
-            <button
-              type="button"
-              onClick={() => setShowRundown(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#F8FAF9] border border-slate-100 text-[#1B4332] text-xs font-semibold hover:border-[#40916C] transition-colors"
-            >
-              <ListOrdered size={14} /> Lihat Susunan Acara
-            </button>
-          )}
-        </div>
-      )}
-
-      {/* Yudisium — undangan selalu tampil begitu eligible */}
-      <div className="rounded-2xl bg-white border border-slate-100 p-5 shadow-sm">
-        <p className="text-xs font-bold uppercase tracking-[2px] text-[#40916C] mb-3">
-          Undangan Yudisium
-        </p>
-        <div className="space-y-1.5 text-sm text-[#1A1A2E] mb-4">
-          {event?.yudisiumSchedule && <p>🗓️ {event.yudisiumSchedule}</p>}
-          {event?.yudisiumVenue && <p>📍 {event.yudisiumVenue}</p>}
-          {event?.yudisiumDresscode && (
-            <p className="text-slate-500">👔 Dresscode: {event.yudisiumDresscode}</p>
-          )}
-          {!event?.yudisiumSchedule && !event?.yudisiumVenue && (
-            <p className="text-slate-400">Informasi jadwal yudisium akan diumumkan panitia.</p>
-          )}
-        </div>
-        {submission?.yudisiumConfirmed ? (
-          <div className="flex items-center gap-2 text-emerald-600">
-            <CheckCircle2 size={18} />
-            <span className="text-sm font-semibold">Kehadiran yudisium terkonfirmasi</span>
-          </div>
-        ) : (
-          <button
-            onClick={handleConfirmYudisium}
-            disabled={busy}
-            className="w-full rounded-xl bg-[#1B4332] text-white text-sm font-semibold py-3 hover:bg-[#40916C] disabled:opacity-60 transition-colors"
-          >
-            Konfirmasi Kehadiran Yudisium
-          </button>
-        )}
-      </div>
-
-      {/* Wisuda Pelepasan — tampil, tapi terkunci sampai WD2 ACC */}
-      <div className="rounded-2xl bg-white border border-slate-100 p-5 shadow-sm">
-        <p className="text-xs font-bold uppercase tracking-[2px] text-[#40916C] mb-3">
-          Undangan Wisuda Pelepasan
-        </p>
-        <div className="space-y-1.5 text-sm text-[#1A1A2E] mb-4">
-          {event?.schedule && <p>🗓️ {event.schedule}</p>}
-          {event?.venue && <p>📍 {event.venue}</p>}
-          {event?.wisudaDresscode && (
-            <p className="text-slate-500">👔 Dresscode: {event.wisudaDresscode}</p>
-          )}
-        </div>
-
-        {submission?.paymentStatus === "approved" ? (
-          <div className="space-y-3">
-            <div className="flex items-center gap-2 text-emerald-600">
-              <CheckCircle2 size={18} />
-              <span className="text-sm font-semibold">Disetujui — undangan wisuda Anda sudah siap.</span>
-            </div>
-            {inviteToken && (
-              <a
-                href={`/invite/${encodeURIComponent(inviteToken)}`}
-                className="block w-full text-center rounded-xl bg-[#1B4332] text-white text-sm font-semibold py-3 hover:bg-[#40916C] transition-colors"
-              >
-                Lihat Undangan & QR Kehadiran
-              </a>
-            )}
-          </div>
-        ) : submission?.paymentStatus === "pending" ? (
-          <div className="flex items-center gap-2 text-amber-600 bg-amber-50 rounded-xl px-3 py-2.5">
-            <Clock size={18} className="shrink-0" />
-            <span className="text-sm font-semibold">Menunggu ACC WD2 terkait pembayaran…</span>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {submission?.paymentStatus === "rejected" && (
-              <div className="flex items-start gap-2 text-rose-600 bg-rose-50 rounded-xl p-3">
-                <XCircle size={16} className="shrink-0 mt-0.5" />
-                <span className="text-xs">
-                  Ditolak: {submission.paymentRejectReason}. Silakan unggah ulang bukti yang valid.
-                </span>
-              </div>
-            )}
-            {submission?.paymentStatus === "none" && (
-              <p className="text-xs text-slate-400">
-                Unggah bukti pembayaran wisuda — undangan baru terkirim setelah disetujui WD2.
-              </p>
-            )}
-            <button
-              onClick={() => fileRef.current?.click()}
-              disabled={busy}
-              className="w-full flex items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-200 text-slate-500 text-sm font-semibold py-4 hover:border-[#40916C] hover:text-[#40916C] disabled:opacity-60 transition-colors"
-            >
-              <Upload size={16} /> Unggah Foto Bukti Pembayaran
-            </button>
-            <input
-              ref={fileRef}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={handleUpload}
-            />
-            <p className="text-[11px] text-slate-400 text-center">Format foto, maksimal 2MB.</p>
-          </div>
-        )}
-      </div>
-
-      {showRundown && (
-        <div
-          className="fixed inset-0 z-50 bg-black/60 flex items-end sm:items-center justify-center"
-          onClick={() => setShowRundown(false)}
-        >
+        {toast && (
           <div
-            className="bg-white rounded-t-3xl sm:rounded-2xl w-full sm:max-w-sm max-h-[80vh] overflow-y-auto p-5"
-            onClick={(e) => e.stopPropagation()}
+            className={`glass-card !rounded-2xl px-4 py-3 text-sm ${
+              toast.type === "err" ? "text-rose-700" : "text-emerald-700"
+            }`}
           >
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-bold text-[#1A1A2E]">Susunan Acara</h3>
-              <button onClick={() => setShowRundown(false)} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500">
-                <X size={18} />
+            {toast.msg}
+          </div>
+        )}
+
+        {event && (
+          <GlassCard strong>
+            <Eyebrow>Acara</Eyebrow>
+            <h2 className="text-base font-bold text-[#11291f] leading-snug">{event.name}</h2>
+          </GlassCard>
+        )}
+
+        {pickup && (
+          <GlassCard>
+            <Eyebrow>Pengambilan</Eyebrow>
+            <div className="flex flex-wrap gap-2 items-center">
+              <StatusPill tone="ok">
+                <CheckCircle2 size={13} /> Sudah diambil di kantor
+              </StatusPill>
+              {pickup.undanganGiven && <StatusPill tone="muted">Undangan</StatusPill>}
+              {pickup.togaGiven && <StatusPill tone="muted">Toga</StatusPill>}
+            </div>
+            <p className="text-xs text-slate-500 mt-2">
+              {new Date(pickup.handedAt).toLocaleString("id-ID", { dateStyle: "long", timeStyle: "short" })}
+            </p>
+          </GlassCard>
+        )}
+
+        {/* Yudisium */}
+        <GlassCard>
+          <Eyebrow>Undangan Yudisium</Eyebrow>
+          <div className="space-y-1.5 text-sm text-[#11291f] mb-4">
+            {event?.yudisiumSchedule && <p>🗓️ {event.yudisiumSchedule}</p>}
+            {event?.yudisiumVenue && <p>📍 {event.yudisiumVenue}</p>}
+            {event?.yudisiumDresscode && <p className="text-slate-600">👔 Dresscode: {event.yudisiumDresscode}</p>}
+            {!event?.yudisiumSchedule && !event?.yudisiumVenue && (
+              <p className="text-slate-500">Informasi jadwal yudisium akan diumumkan panitia.</p>
+            )}
+          </div>
+          {submission?.yudisiumStatus === "hadir" && (
+            <div className="flex items-center justify-between gap-2">
+              <StatusPill tone="ok">
+                <CheckCircle2 size={13} /> Hadir terkonfirmasi
+              </StatusPill>
+              <button onClick={() => setSheet("absent")} className="text-xs font-semibold text-slate-500 underline">
+                Ubah
               </button>
             </div>
-            <div className="space-y-3">
-              {rundown.map((item) => (
-                <div key={item.order} className="flex gap-3 text-sm">
-                  <span className="shrink-0 w-14 font-semibold text-[#1B4332]">{item.timeStart ?? "-"}</span>
-                  <div className="flex-1">
-                    <p className="text-[#1A1A2E]">{item.title}</p>
-                    {item.durationMinutes != null && (
-                      <p className="text-xs text-slate-400">{item.durationMinutes} menit</p>
-                    )}
-                  </div>
-                </div>
-              ))}
+          )}
+          {submission?.yudisiumStatus === "tidak_hadir" && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <StatusPill tone="bad">
+                  <XCircle size={13} /> Tidak hadir
+                </StatusPill>
+                <button onClick={() => sendYudisium(true)} className="text-xs font-semibold text-slate-500 underline">
+                  Ubah jadi hadir
+                </button>
+              </div>
+              {submission.yudisiumAbsentReason && (
+                <p className="glass-inset p-3 text-sm text-slate-600">Catatan: {submission.yudisiumAbsentReason}</p>
+              )}
             </div>
+          )}
+          {submission?.yudisiumStatus === "pending" && (
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                onClick={() => sendYudisium(true)}
+                disabled={busy}
+                className="glass-btn glass-btn-primary"
+              >
+                Hadir
+              </button>
+              <button onClick={() => setSheet("absent")} disabled={busy} className="glass-btn glass-btn-danger">
+                Tidak Hadir
+              </button>
+            </div>
+          )}
+        </GlassCard>
+
+        {/* Wisuda Pelepasan Fakultas */}
+        <GlassCard>
+          <Eyebrow>Wisuda Pelepasan Fakultas</Eyebrow>
+          <div className="space-y-1.5 text-sm text-[#11291f] mb-4">
+            {event?.schedule && <p>🗓️ {event.schedule}</p>}
+            {event?.venue && <p>📍 {event.venue}</p>}
+            {event?.wisudaDresscode && <p className="text-slate-600">👔 Dresscode: {event.wisudaDresscode}</p>}
           </div>
+          {renderPayment("fakultas")}
+          {invitationReady && inviteToken && (
+            <a
+              href={`/invite/${encodeURIComponent(inviteToken)}`}
+              className="glass-btn glass-btn-primary w-full mt-3 flex items-center justify-center gap-2"
+            >
+              <QrCode size={16} /> Lihat Undangan &amp; QR Kehadiran
+            </a>
+          )}
+        </GlassCard>
+
+        {/* Wisuda Univ */}
+        <GlassCard>
+          <Eyebrow>Wisuda Universitas</Eyebrow>
+          <div className="space-y-1.5 text-sm text-[#11291f] mb-4">
+            {event?.univSchedule && <p>🗓️ {event.univSchedule}</p>}
+            {event?.univVenue && <p>📍 {event.univVenue}</p>}
+            {!event?.univSchedule && !event?.univVenue && (
+              <p className="text-slate-500">Informasi wisuda universitas akan diumumkan panitia.</p>
+            )}
+          </div>
+          {renderPayment("univ")}
+        </GlassCard>
+      </div>
+
+      {/* Floating iOS-style bar */}
+      <nav className="glass-bar">
+        <button className="is-active" onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}>
+          <Home size={20} />
+          Beranda
+        </button>
+        <button onClick={() => setSheet("rundown")}>
+          <ListOrdered size={20} />
+          Rundown
+        </button>
+        <button onClick={openNotifications}>
+          <Bell size={20} />
+          {unread > 0 && (
+            <span className="absolute top-1 right-[28%] min-w-4 h-4 px-1 rounded-full bg-rose-500 text-white text-[10px] flex items-center justify-center">
+              {unread}
+            </span>
+          )}
+          Notifikasi
+        </button>
+        <button onClick={handleLogout}>
+          <LogOut size={20} />
+          Keluar
+        </button>
+      </nav>
+
+      <GlassSheet open={sheet === "rundown"} onClose={() => setSheet(null)}>
+        <h3 className="text-lg font-bold text-[#11291f] mb-4 flex items-center gap-2">
+          <CalendarCheck size={18} /> Susunan Acara
+        </h3>
+        {rundown.length === 0 ? (
+          <p className="text-sm text-slate-500">Rundown belum tersedia.</p>
+        ) : (
+          <div className="space-y-3">
+            {rundown.map((item) => (
+              <div key={item.order} className="glass-inset p-3 flex gap-3 text-sm">
+                <span className="shrink-0 w-14 font-bold text-[#1B4332]">{item.timeStart ?? "-"}</span>
+                <div>
+                  <p className="text-[#11291f]">{item.title}</p>
+                  {item.durationMinutes != null && (
+                    <p className="text-xs text-slate-500">{item.durationMinutes} menit</p>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </GlassSheet>
+
+      <GlassSheet open={sheet === "notif"} onClose={() => setSheet(null)}>
+        <h3 className="text-lg font-bold text-[#11291f] mb-4">Notifikasi</h3>
+        {notifications.length === 0 ? (
+          <p className="text-sm text-slate-500">Belum ada notifikasi.</p>
+        ) : (
+          <div className="space-y-2">
+            {notifications.map((n) => (
+              <div key={n.id} className="glass-inset p-3">
+                <p className="text-sm font-semibold text-[#11291f]">{n.title}</p>
+                {n.body && <p className="text-xs text-slate-600 mt-0.5">{n.body}</p>}
+              </div>
+            ))}
+          </div>
+        )}
+      </GlassSheet>
+
+      <GlassSheet open={sheet === "absent"} onClose={() => setSheet(null)}>
+        <h3 className="text-lg font-bold text-[#11291f] mb-1">Tidak Hadir Yudisium</h3>
+        <p className="text-sm text-slate-500 mb-4">Catatan alasan bersifat opsional.</p>
+        <textarea
+          value={absentReason}
+          onChange={(e) => setAbsentReason(e.target.value)}
+          placeholder="Contoh: sedang sakit / ada keperluan keluarga"
+          className="glass-input mb-4"
+        />
+        <div className="grid grid-cols-2 gap-3">
+          <button onClick={() => setSheet(null)} className="glass-btn glass-btn-soft">
+            Batal
+          </button>
+          <button
+            onClick={() => sendYudisium(false, absentReason)}
+            disabled={busy}
+            className="glass-btn glass-btn-danger"
+          >
+            Simpan
+          </button>
         </div>
-      )}
+      </GlassSheet>
     </div>
   );
 }

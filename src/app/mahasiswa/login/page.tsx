@@ -32,52 +32,45 @@ export default function MahasiswaLoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#F8FAF9] flex items-center justify-center px-5 py-10">
-      <div className="w-full max-w-sm rounded-3xl bg-white border border-slate-100 p-6 shadow-sm">
-        <div className="text-center mb-6">
-          <GraduationCap className="mx-auto text-[#1B4332] mb-2" size={36} />
-          <h1 className="text-lg font-bold text-[#1A1A2E]">Login Mahasiswa</h1>
-          <p className="text-sm text-slate-500 mt-1">Yudisium &amp; Wisuda Pelepasan FT UNISMA</p>
+    <div className="glass-bg flex items-center justify-center px-5">
+      <div className="glass-card-strong glass-enter w-full max-w-sm p-7">
+        <div className="mb-6">
+          <div className="glass-card !rounded-2xl inline-flex p-3 mb-4">
+            <GraduationCap className="text-[#1B4332]" size={26} />
+          </div>
+          <h1 className="glass-title">Masuk</h1>
+          <p className="text-sm text-slate-600 mt-2">Yudisium &amp; Wisuda Pelepasan FT UNISMA</p>
         </div>
         <form onSubmit={handleSubmit} className="space-y-3">
-          <label className="block">
-            <span className="text-xs font-semibold text-slate-600">NPM</span>
-            <input
-              type="text"
-              required
-              value={npm}
-              onChange={(e) => setNpm(e.target.value)}
-              className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm text-[#1A1A2E] focus:border-[#1B4332] focus:outline-none"
-            />
-          </label>
-          <label className="block">
-            <span className="text-xs font-semibold text-slate-600">Password</span>
-            <input
-              type="password"
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm text-[#1A1A2E] focus:border-[#1B4332] focus:outline-none"
-            />
-          </label>
-          {error && (
-            <p className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm text-rose-700">
-              {error}
-            </p>
-          )}
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full flex items-center justify-center gap-2 rounded-xl bg-[#1B4332] text-white text-sm font-semibold py-3 hover:bg-[#40916C] disabled:opacity-60 transition-colors"
-          >
+          <input
+            type="text"
+            inputMode="numeric"
+            autoComplete="username"
+            required
+            placeholder="NPM"
+            value={npm}
+            onChange={(e) => setNpm(e.target.value)}
+            className="glass-input"
+          />
+          <input
+            type="password"
+            autoComplete="current-password"
+            required
+            placeholder="Password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className="glass-input"
+          />
+          {error && <p className="glass-inset px-4 py-3 text-sm text-rose-700">{error}</p>}
+          <button type="submit" disabled={loading} className="glass-btn glass-btn-primary w-full flex items-center justify-center gap-2">
             {loading && <Loader2 size={16} className="animate-spin" />}
             Masuk
           </button>
         </form>
-        <p className="text-center text-xs text-slate-400 mt-4">
+        <p className="text-center text-sm text-slate-600 mt-5">
           Belum punya akun?{" "}
-          <Link href="/mahasiswa/daftar" className="text-[#40916C] font-semibold">
-            Daftar di sini
+          <Link href="/mahasiswa/daftar" className="font-semibold text-[#1B4332]">
+            Daftar
           </Link>
         </p>
       </div>

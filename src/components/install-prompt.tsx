@@ -78,22 +78,22 @@ export function InstallPrompt() {
   if (!view) return null;
 
   return (
-    <div className="rounded-2xl bg-[#1B4332] text-white p-4 shadow-sm relative">
+    <div className="glass-card !rounded-3xl p-4 relative text-[#11291f]">
       <button
         onClick={dismiss}
-        className="absolute top-3 right-3 p-1 rounded-lg hover:bg-white/10 text-white/70"
+        className="absolute top-3 right-3 p-1.5 rounded-xl text-slate-500"
       >
         <X size={16} />
       </button>
       {view.platform === "android" ? (
         <div className="pr-6">
           <p className="text-sm font-semibold mb-1">Instal aplikasi ini di HP Anda</p>
-          <p className="text-xs text-white/70 mb-3">
+          <p className="text-xs text-slate-600 mb-3">
             Tambahkan ke layar utama agar bisa cek cepat status verifikasi WD2 kapan saja.
           </p>
           <button
             onClick={handleInstall}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white text-[#1B4332] text-xs font-semibold hover:bg-white/90"
+            className="glass-btn glass-btn-primary inline-flex items-center gap-1.5 px-4 !min-h-10 text-xs"
           >
             <Download size={14} /> Instal Aplikasi
           </button>
@@ -101,7 +101,7 @@ export function InstallPrompt() {
       ) : (
         <div className="pr-6">
           <p className="text-sm font-semibold mb-1">Tambahkan ke Layar Utama</p>
-          <p className="text-xs text-white/70">
+          <p className="text-xs text-slate-600">
             Tap tombol <Share size={12} className="inline -mt-0.5" /> <strong>Share</strong> di Safari, lalu pilih{" "}
             <strong>&quot;Add to Home Screen&quot;</strong> agar bisa cek cepat status verifikasi WD2.
           </p>

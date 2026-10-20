@@ -22,6 +22,8 @@ export default function NewEventPage() {
     yudisiumVenue: "",
     yudisiumDresscode: "",
     wisudaDresscode: "",
+    univSchedule: "",
+    univVenue: "",
   });
 
   const set = (key: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
@@ -49,6 +51,8 @@ export default function NewEventPage() {
           yudisiumVenue: form.yudisiumVenue.trim() || undefined,
           yudisiumDresscode: form.yudisiumDresscode.trim() || undefined,
           wisudaDresscode: form.wisudaDresscode.trim() || undefined,
+          univSchedule: form.univSchedule.trim() || undefined,
+          univVenue: form.univVenue.trim() || undefined,
         }),
       });
 
@@ -209,8 +213,26 @@ export default function NewEventPage() {
                 className={inputCls}
               />
             </Field>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Jadwal Wisuda Univ">
+                <input
+                  placeholder="cth. Minggu, 25 Oktober 2026"
+                  value={form.univSchedule}
+                  onChange={set("univSchedule")}
+                  className={inputCls}
+                />
+              </Field>
+              <Field label="Lokasi Wisuda Univ">
+                <input
+                  placeholder="cth. Gedung Bundar UNISMA"
+                  value={form.univVenue}
+                  onChange={set("univVenue")}
+                  className={inputCls}
+                />
+              </Field>
+            </div>
             <p className="text-xs text-slate-400">
-              Lokasi &amp; jadwal wisuda pelepasan memakai field Tanggal/Waktu/Lokasi di atas.
+              Lokasi &amp; jadwal wisuda pelepasan fakultas memakai field Tanggal/Waktu/Lokasi di atas.
             </p>
           </div>
         </div>

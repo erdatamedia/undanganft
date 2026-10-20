@@ -3,8 +3,10 @@ import { getMahasiswaFromSession } from "@/lib/mahasiswa-auth";
 import {
   findActiveEvent,
   getOrCreateSubmission,
+  getPayments,
   notifyAllWd2,
   uploadPaymentProof,
+  type PaymentKind,
 } from "@/lib/graduation";
 
 export const runtime = "nodejs";
@@ -23,6 +25,12 @@ export async function POST(request: Request) {
   }
 
   const form = await request.formData();
+  const kindRaw = form.get("kind");
+  const kind: PaymentKind | null = kindRaw === "fakultas" || kindRaw === "univ" ? kindRaw : null;
+  if (!kind) {
+    return NextResponse.json({ message: "Jenis bukti pembayaran tidak valid." }, { status: 400 });
+  }
+
   const file = form.get("photo");
   if (!(file instanceof Blob)) {
     return NextResponse.json({ message: "Foto bukti pembayaran wajib diunggah." }, { status: 400 });
@@ -35,19 +43,26 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "File harus berupa foto." }, { status: 400 });
   }
 
-  const buffer = Buffer.from(await file.arrayBuffer());
-  const base64 = buffer.toString("base64");
-  const dataUri = `data:${mimeType};base64,${base64}`;
-
   const submission = await getOrCreateSubmission(active.eventId, mhs.id);
-  const updated = await uploadPaymentProof(submission.id, dataUri);
+  const current = await getPayments(submission.id);
+  const existing = current[kind];
+  if (existing && (existing.status === "approved" || existing.status === "desk")) {
+    return NextResponse.json(
+      { message: "Bukti pembayaran ini sudah diverifikasi dan tidak bisa diganti." },
+      { status: 400 }
+    );
+  }
+
+  const buffer = Buffer.from(await file.arrayBuffer());
+  const dataUri = `data:${mimeType};base64,${buffer.toString("base64")}`;
+  await uploadPaymentProof(submission.id, kind, dataUri);
 
   await notifyAllWd2({
     type: "payment_submitted",
     title: `Bukti pembayaran baru: ${mhs.name}`,
-    body: `NPM ${mhs.npm} mengunggah bukti pembayaran wisuda dan menunggu review.`,
+    body: `NPM ${mhs.npm} mengunggah bukti bayar wisuda ${kind === "fakultas" ? "pelepasan fakultas" : "univ"} dan menunggu review.`,
     link: "/wd2/review",
   });
 
-  return NextResponse.json({ submission: updated });
+  return NextResponse.json({ payments: await getPayments(submission.id) });
 }

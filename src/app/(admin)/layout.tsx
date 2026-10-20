@@ -9,7 +9,7 @@ export default async function AdminLayout({
   await requireUser();
 
   return (
-    <div className="min-h-screen bg-[#F8FAF9]">
+    <div className="min-h-screen bg-[#F7F8FA]">
       <Sidebar />
       <main className="ml-60 min-h-screen p-8 max-w-[1440px]">
         {children}

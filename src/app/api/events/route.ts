@@ -41,6 +41,8 @@ export async function POST(req: Request) {
     yudisiumVenue: payload.yudisiumVenue,
     yudisiumDresscode: payload.yudisiumDresscode,
     wisudaDresscode: payload.wisudaDresscode,
+    univSchedule: payload.univSchedule,
+    univVenue: payload.univVenue,
   });
 
   return NextResponse.json(event, { status: 201 });

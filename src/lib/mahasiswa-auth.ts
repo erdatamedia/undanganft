@@ -106,3 +106,24 @@ export async function resetMahasiswaPassword(npm: string): Promise<{ password: s
   await setMahasiswaPasswordHash(row.id, passwordHash);
   return { password };
 }
+
+/** Admin desk walk-in: creates the account directly (no eligible list), returns the generated password once. */
+export async function registerMahasiswaByAdmin(payload: {
+  npm: string;
+  name: string;
+  email?: string;
+}): Promise<{ mahasiswa: MahasiswaRecord; password: string }> {
+  const npm = normalizeNpm(payload.npm);
+  const name = payload.name.trim();
+  if (!npm || !name) {
+    throw new Error("Nama dan NPM wajib diisi.");
+  }
+  const existing = await findMahasiswaByNpm(npm);
+  if (existing) {
+    throw new Error("NPM ini sudah terdaftar. Cari lewat kolom pencarian.");
+  }
+  const password = generatePassword();
+  const passwordHash = await bcrypt.hash(password, 10);
+  const mahasiswa = await createMahasiswa({ npm, name, email: payload.email?.trim() || "", passwordHash });
+  return { mahasiswa, password };
+}

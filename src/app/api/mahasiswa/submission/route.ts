@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getMahasiswaFromSession } from "@/lib/mahasiswa-auth";
-import { findActiveEvent, getOrCreateSubmission } from "@/lib/graduation";
+import { findActiveEvent, getOrCreateSubmission, getPayments, getPickupBySubmission } from "@/lib/graduation";
 import { getEvent } from "@/lib/event";
 import { getAttendee } from "@/lib/storage";
 
@@ -23,12 +23,27 @@ export async function GET() {
     getOrCreateSubmission(active.eventId, mhs.id),
   ]);
 
-  const attendee = submission.attendeeId ? await getAttendee(submission.attendeeId) : null;
+  const [payments, pickup, attendee] = await Promise.all([
+    getPayments(submission.id),
+    getPickupBySubmission(submission.id),
+    submission.attendeeId ? getAttendee(submission.attendeeId) : Promise.resolve(null),
+  ]);
 
   return NextResponse.json({
     event,
     submission,
     mahasiswa: mhs,
+    payments: {
+      fakultas: payments.fakultas
+        ? { id: payments.fakultas.id, status: payments.fakultas.status, rejectReason: payments.fakultas.rejectReason, source: payments.fakultas.source }
+        : null,
+      univ: payments.univ
+        ? { id: payments.univ.id, status: payments.univ.status, rejectReason: payments.univ.rejectReason, source: payments.univ.source }
+        : null,
+    },
+    pickup: pickup
+      ? { handedAt: pickup.handedAt, undanganGiven: pickup.undanganGiven, togaGiven: pickup.togaGiven }
+      : null,
     inviteToken: attendee?.token ?? null,
   });
 }

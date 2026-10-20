@@ -99,6 +99,59 @@ async function ensureGraduationSchemaInternal() {
     end $$
   `);
   await query(`create index if not exists idx_grad_notif_recipient on graduation_notifications(recipient_type, recipient_id, read_at)`);
+
+  await query(`alter table graduation_submissions add column if not exists yudisium_status text not null default 'pending'`);
+  await query(`alter table graduation_submissions add column if not exists yudisium_absent_reason text`);
+  await query(`update graduation_submissions set yudisium_status='hadir' where yudisium_confirmed=true and yudisium_status='pending'`);
+
+  await query(`
+    create table if not exists graduation_payments (
+      id uuid primary key default uuid_generate_v4(),
+      submission_id uuid not null references graduation_submissions(id) on delete cascade,
+      kind text not null check (kind in ('fakultas','univ')),
+      proof text,
+      status text not null default 'none' check (status in ('none','pending','approved','rejected','desk')),
+      source text not null default 'mahasiswa' check (source in ('mahasiswa','admin_desk')),
+      uploaded_at timestamptz,
+      reviewed_by_type text,
+      reviewed_by uuid,
+      reviewed_at timestamptz,
+      reject_reason text,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now(),
+      unique (submission_id, kind)
+    )
+  `);
+  await query(`create index if not exists idx_grad_payments_status on graduation_payments(status)`);
+
+  // One-off migration of the legacy single payment proof into kind='fakultas'
+  await query(`
+    insert into graduation_payments (submission_id, kind, proof, status, source, uploaded_at, reviewed_by_type, reviewed_by, reviewed_at, reject_reason)
+    select id, 'fakultas', payment_proof, payment_status, 'mahasiswa', payment_proof_uploaded_at,
+           case when payment_reviewed_by is not null then 'wd2' end, payment_reviewed_by, payment_reviewed_at, payment_reject_reason
+    from graduation_submissions
+    where payment_status <> 'none'
+    on conflict (submission_id, kind) do nothing
+  `);
+
+  await query(`
+    create table if not exists graduation_pickups (
+      id uuid primary key default uuid_generate_v4(),
+      submission_id uuid not null unique references graduation_submissions(id) on delete cascade,
+      handed_by uuid,
+      handed_at timestamptz not null default now(),
+      undangan_given boolean not null default false,
+      toga_given boolean not null default false,
+      handover_photo text,
+      note text,
+      wd2_check_status text not null default 'pending' check (wd2_check_status in ('pending','valid','issue')),
+      wd2_check_by uuid,
+      wd2_check_by_type text,
+      wd2_check_at timestamptz,
+      wd2_check_note text
+    )
+  `);
+  await query(`create index if not exists idx_grad_pickups_check on graduation_pickups(wd2_check_status)`);
 }
 
 export async function ensureGraduationSchema() {
@@ -136,7 +189,10 @@ export type Wd2AccountRecord = {
   createdAt: string;
 };
 
-export type PaymentStatus = "none" | "pending" | "approved" | "rejected";
+export type PaymentKind = "fakultas" | "univ";
+export type PaymentStatus = "none" | "pending" | "approved" | "rejected" | "desk";
+export type YudisiumStatus = "pending" | "hadir" | "tidak_hadir";
+export type ReviewerType = "wd2" | "admin";
 
 export type GraduationSubmissionRecord = {
   id: string;
@@ -144,16 +200,38 @@ export type GraduationSubmissionRecord = {
   mahasiswaId: string;
   yudisiumConfirmed: boolean;
   yudisiumConfirmedAt: string | null;
-  paymentProof: string | null;
-  paymentProofUploadedAt: string | null;
-  paymentStatus: PaymentStatus;
-  paymentReviewedBy: string | null;
-  paymentReviewedAt: string | null;
-  paymentRejectReason: string | null;
+  yudisiumStatus: YudisiumStatus;
+  yudisiumAbsentReason: string | null;
   wisudaConfirmed: boolean;
   attendeeId: string | null;
   createdAt: string;
   updatedAt: string;
+};
+
+export type PaymentRecord = {
+  id: string;
+  submissionId: string;
+  kind: PaymentKind;
+  proof: string | null;
+  status: PaymentStatus;
+  source: "mahasiswa" | "admin_desk";
+  uploadedAt: string | null;
+  reviewedByType: ReviewerType | null;
+  reviewedAt: string | null;
+  rejectReason: string | null;
+};
+
+export type PickupRecord = {
+  id: string;
+  submissionId: string;
+  handedAt: string;
+  undanganGiven: boolean;
+  togaGiven: boolean;
+  handoverPhoto: string | null;
+  note: string | null;
+  wd2CheckStatus: "pending" | "valid" | "issue";
+  wd2CheckAt: string | null;
+  wd2CheckNote: string | null;
 };
 
 export type GraduationNotificationRecord = {
@@ -199,12 +277,8 @@ type GraduationSubmissionRow = {
   mahasiswa_id: string;
   yudisium_confirmed: boolean;
   yudisium_confirmed_at: string | null;
-  payment_proof: string | null;
-  payment_proof_uploaded_at: string | null;
-  payment_status: PaymentStatus;
-  payment_reviewed_by: string | null;
-  payment_reviewed_at: string | null;
-  payment_reject_reason: string | null;
+  yudisium_status: YudisiumStatus;
+  yudisium_absent_reason: string | null;
   wisuda_confirmed: boolean;
   attendee_id: string | null;
   created_at: string;
@@ -252,12 +326,8 @@ const mapSubmission = (row: GraduationSubmissionRow): GraduationSubmissionRecord
   mahasiswaId: row.mahasiswa_id,
   yudisiumConfirmed: row.yudisium_confirmed,
   yudisiumConfirmedAt: row.yudisium_confirmed_at,
-  paymentProof: row.payment_proof,
-  paymentProofUploadedAt: row.payment_proof_uploaded_at,
-  paymentStatus: row.payment_status,
-  paymentReviewedBy: row.payment_reviewed_by,
-  paymentReviewedAt: row.payment_reviewed_at,
-  paymentRejectReason: row.payment_reject_reason,
+  yudisiumStatus: row.yudisium_status,
+  yudisiumAbsentReason: row.yudisium_absent_reason,
   wisudaConfirmed: row.wisuda_confirmed,
   attendeeId: row.attendee_id,
   createdAt: row.created_at,
@@ -468,120 +538,401 @@ export async function getSubmissionById(id: string): Promise<GraduationSubmissio
   return rows[0] ? mapSubmission(rows[0]) : null;
 }
 
-export async function listSubmissions(
-  eventId: string,
-  status?: PaymentStatus
-): Promise<GraduationSubmissionRecord[]> {
+export async function setYudisiumStatus(
+  submissionId: string,
+  attending: boolean,
+  reason?: string | null
+): Promise<GraduationSubmissionRecord | null> {
   await ensureGraduationSchema();
-  const rows = status
-    ? await query<GraduationSubmissionRow>(
-        "select * from graduation_submissions where event_id=$1 and payment_status=$2 order by payment_proof_uploaded_at asc nulls last, created_at asc",
-        [eventId, status]
-      )
-    : await query<GraduationSubmissionRow>(
-        "select * from graduation_submissions where event_id=$1 order by created_at asc",
-        [eventId]
-      );
-  return rows.map(mapSubmission);
+  const rows = await query<GraduationSubmissionRow>(
+    `update graduation_submissions
+     set yudisium_status=$2, yudisium_confirmed=$3,
+         yudisium_confirmed_at=now(), yudisium_absent_reason=$4, updated_at=now()
+     where id=$1
+     returning *`,
+    [submissionId, attending ? "hadir" : "tidak_hadir", attending, attending ? null : reason?.trim() || null]
+  );
+  return rows[0] ? mapSubmission(rows[0]) : null;
 }
 
-export type SubmissionWithMahasiswa = GraduationSubmissionRecord & {
+export async function setSubmissionAttendee(
+  submissionId: string,
+  attendeeId: string
+): Promise<void> {
+  await ensureGraduationSchema();
+  await query(
+    `update graduation_submissions set attendee_id=$2, wisuda_confirmed=true, updated_at=now() where id=$1`,
+    [submissionId, attendeeId]
+  );
+}
+
+// ─── Payments (2 bukti: fakultas & univ) ────────────────────────────────────
+
+type PaymentRow = {
+  id: string;
+  submission_id: string;
+  kind: PaymentKind;
+  proof: string | null;
+  status: PaymentStatus;
+  source: "mahasiswa" | "admin_desk";
+  uploaded_at: string | null;
+  reviewed_by_type: ReviewerType | null;
+  reviewed_at: string | null;
+  reject_reason: string | null;
+};
+
+const mapPayment = (row: PaymentRow): PaymentRecord => ({
+  id: row.id,
+  submissionId: row.submission_id,
+  kind: row.kind,
+  proof: row.proof,
+  status: row.status,
+  source: row.source,
+  uploadedAt: row.uploaded_at,
+  reviewedByType: row.reviewed_by_type,
+  reviewedAt: row.reviewed_at,
+  rejectReason: row.reject_reason,
+});
+
+export type PaymentsByKind = { fakultas: PaymentRecord | null; univ: PaymentRecord | null };
+
+export async function getPayments(submissionId: string): Promise<PaymentsByKind> {
+  await ensureGraduationSchema();
+  const rows = await query<PaymentRow>(
+    "select * from graduation_payments where submission_id=$1",
+    [submissionId]
+  );
+  const result: PaymentsByKind = { fakultas: null, univ: null };
+  for (const row of rows) result[row.kind] = mapPayment(row);
+  return result;
+}
+
+export async function getPaymentById(id: string): Promise<PaymentRecord | null> {
+  await ensureGraduationSchema();
+  const rows = await query<PaymentRow>("select * from graduation_payments where id=$1 limit 1", [id]);
+  return rows[0] ? mapPayment(rows[0]) : null;
+}
+
+/** Student upload (or re-upload after rejection): always goes back to 'pending'. */
+export async function uploadPaymentProof(
+  submissionId: string,
+  kind: PaymentKind,
+  dataUri: string
+): Promise<PaymentRecord> {
+  await ensureGraduationSchema();
+  const rows = await query<PaymentRow>(
+    `insert into graduation_payments (submission_id, kind, proof, status, source, uploaded_at)
+     values ($1, $2, $3, 'pending', 'mahasiswa', now())
+     on conflict (submission_id, kind) do update
+       set proof=excluded.proof, status='pending', source='mahasiswa', uploaded_at=now(),
+           reviewed_by_type=null, reviewed_by=null, reviewed_at=null, reject_reason=null, updated_at=now()
+     returning *`,
+    [submissionId, kind, dataUri]
+  );
+  return mapPayment(rows[0]);
+}
+
+/** Admin desk: proof photographed at the counter, handed over without waiting for WD2. */
+export async function upsertDeskPayment(
+  submissionId: string,
+  kind: PaymentKind,
+  dataUri: string,
+  adminId: string
+): Promise<PaymentRecord> {
+  await ensureGraduationSchema();
+  const rows = await query<PaymentRow>(
+    `insert into graduation_payments (submission_id, kind, proof, status, source, uploaded_at, reviewed_by_type, reviewed_by, reviewed_at)
+     values ($1, $2, $3, 'desk', 'admin_desk', now(), 'admin', $4, now())
+     on conflict (submission_id, kind) do update
+       set proof=excluded.proof, status='desk', source='admin_desk', uploaded_at=now(),
+           reviewed_by_type='admin', reviewed_by=excluded.reviewed_by, reviewed_at=now(), reject_reason=null, updated_at=now()
+     returning *`,
+    [submissionId, kind, dataUri, adminId]
+  );
+  return mapPayment(rows[0]);
+}
+
+export async function approvePayment(
+  paymentId: string,
+  reviewer: { type: ReviewerType; id: string }
+): Promise<PaymentRecord | null> {
+  await ensureGraduationSchema();
+  const rows = await query<PaymentRow>(
+    `update graduation_payments
+     set status='approved', reviewed_by_type=$2, reviewed_by=$3, reviewed_at=now(), reject_reason=null, updated_at=now()
+     where id=$1
+     returning *`,
+    [paymentId, reviewer.type, reviewer.id]
+  );
+  return rows[0] ? mapPayment(rows[0]) : null;
+}
+
+export async function rejectPayment(
+  paymentId: string,
+  reviewer: { type: ReviewerType; id: string },
+  reason: string
+): Promise<PaymentRecord | null> {
+  await ensureGraduationSchema();
+  const rows = await query<PaymentRow>(
+    `update graduation_payments
+     set status='rejected', reviewed_by_type=$2, reviewed_by=$3, reviewed_at=now(), reject_reason=$4, updated_at=now()
+     where id=$1
+     returning *`,
+    [paymentId, reviewer.type, reviewer.id, reason]
+  );
+  return rows[0] ? mapPayment(rows[0]) : null;
+}
+
+export type ReviewQueueItem = {
+  submissionId: string;
+  mahasiswaId: string;
   mahasiswaNpm: string;
   mahasiswaName: string;
   mahasiswaEmail: string | null;
+  payments: PaymentsByKind;
 };
 
-export async function listSubmissionsByStatusWithMahasiswa(
-  status: PaymentStatus
-): Promise<SubmissionWithMahasiswa[]> {
+/** Students having at least one payment proof waiting for a decision. */
+export async function listReviewQueue(): Promise<ReviewQueueItem[]> {
   await ensureGraduationSchema();
-  const rows = await query<GraduationSubmissionRow & { npm: string; name: string; email: string | null }>(
-    `select gs.*, m.npm, m.name, m.email
+  const subs = await query<{
+    id: string;
+    mahasiswa_id: string;
+    npm: string;
+    name: string;
+    email: string | null;
+  }>(
+    `select gs.id, gs.mahasiswa_id, m.npm, m.name, m.email
      from graduation_submissions gs
      join mahasiswa m on m.id = gs.mahasiswa_id
-     where gs.payment_status=$1
-     order by gs.payment_proof_uploaded_at asc nulls last, gs.created_at asc`,
-    [status]
+     where exists (select 1 from graduation_payments gp where gp.submission_id = gs.id and gp.status='pending')
+     order by (select min(uploaded_at) from graduation_payments gp where gp.submission_id = gs.id and gp.status='pending') asc`
   );
-  return rows.map((row) => ({
-    ...mapSubmission(row),
-    mahasiswaNpm: row.npm,
-    mahasiswaName: row.name,
-    mahasiswaEmail: row.email,
-  }));
+  const items: ReviewQueueItem[] = [];
+  for (const sub of subs) {
+    items.push({
+      submissionId: sub.id,
+      mahasiswaId: sub.mahasiswa_id,
+      mahasiswaNpm: sub.npm,
+      mahasiswaName: sub.name,
+      mahasiswaEmail: sub.email,
+      payments: await getPayments(sub.id),
+    });
+  }
+  return items;
 }
 
-export async function listSubmissionsByStatus(
-  status: PaymentStatus
-): Promise<GraduationSubmissionRecord[]> {
-  await ensureGraduationSchema();
-  const rows = await query<GraduationSubmissionRow>(
-    "select * from graduation_submissions where payment_status=$1 order by payment_proof_uploaded_at asc nulls last, created_at asc",
-    [status]
-  );
-  return rows.map(mapSubmission);
-}
+// ─── Pickups (meja pengambilan) ─────────────────────────────────────────────
 
-export async function confirmYudisium(submissionId: string): Promise<GraduationSubmissionRecord | null> {
+type PickupRow = {
+  id: string;
+  submission_id: string;
+  handed_at: string;
+  undangan_given: boolean;
+  toga_given: boolean;
+  handover_photo: string | null;
+  note: string | null;
+  wd2_check_status: "pending" | "valid" | "issue";
+  wd2_check_at: string | null;
+  wd2_check_note: string | null;
+};
+
+const mapPickup = (row: PickupRow): PickupRecord => ({
+  id: row.id,
+  submissionId: row.submission_id,
+  handedAt: row.handed_at,
+  undanganGiven: row.undangan_given,
+  togaGiven: row.toga_given,
+  handoverPhoto: row.handover_photo,
+  note: row.note,
+  wd2CheckStatus: row.wd2_check_status,
+  wd2CheckAt: row.wd2_check_at,
+  wd2CheckNote: row.wd2_check_note,
+});
+
+export async function getPickupBySubmission(submissionId: string): Promise<PickupRecord | null> {
   await ensureGraduationSchema();
-  const rows = await query<GraduationSubmissionRow>(
-    `update graduation_submissions
-     set yudisium_confirmed=true, yudisium_confirmed_at=now(), updated_at=now()
-     where id=$1
-     returning *`,
+  const rows = await query<PickupRow>(
+    "select * from graduation_pickups where submission_id=$1 limit 1",
     [submissionId]
   );
-  return rows[0] ? mapSubmission(rows[0]) : null;
+  return rows[0] ? mapPickup(rows[0]) : null;
 }
 
-export async function uploadPaymentProof(
-  submissionId: string,
-  dataUri: string
-): Promise<GraduationSubmissionRecord | null> {
+export async function getPickupById(id: string): Promise<PickupRecord | null> {
   await ensureGraduationSchema();
-  const rows = await query<GraduationSubmissionRow>(
-    `update graduation_submissions
-     set payment_proof=$1, payment_proof_uploaded_at=now(), payment_status='pending',
-         payment_reject_reason=null, updated_at=now()
-     where id=$2
-     returning *`,
-    [dataUri, submissionId]
-  );
-  return rows[0] ? mapSubmission(rows[0]) : null;
+  const rows = await query<PickupRow>("select * from graduation_pickups where id=$1 limit 1", [id]);
+  return rows[0] ? mapPickup(rows[0]) : null;
 }
 
-export async function markSubmissionApproved(
-  submissionId: string,
-  wd2Id: string,
-  attendeeId: string
-): Promise<GraduationSubmissionRecord | null> {
+export async function upsertPickup(payload: {
+  submissionId: string;
+  adminId: string;
+  undanganGiven: boolean;
+  togaGiven: boolean;
+  handoverPhoto: string | null;
+  note?: string | null;
+}): Promise<PickupRecord> {
   await ensureGraduationSchema();
-  const rows = await query<GraduationSubmissionRow>(
-    `update graduation_submissions
-     set payment_status='approved', payment_reviewed_by=$1, payment_reviewed_at=now(),
-         wisuda_confirmed=true, attendee_id=$2, updated_at=now()
-     where id=$3
+  const rows = await query<PickupRow>(
+    `insert into graduation_pickups (submission_id, handed_by, undangan_given, toga_given, handover_photo, note)
+     values ($1, $2, $3, $4, $5, $6)
+     on conflict (submission_id) do update
+       set handed_by=excluded.handed_by, handed_at=now(), undangan_given=excluded.undangan_given,
+           toga_given=excluded.toga_given, handover_photo=excluded.handover_photo, note=excluded.note,
+           wd2_check_status='pending', wd2_check_by=null, wd2_check_by_type=null, wd2_check_at=null, wd2_check_note=null
      returning *`,
-    [wd2Id, attendeeId, submissionId]
+    [
+      payload.submissionId,
+      payload.adminId,
+      payload.undanganGiven,
+      payload.togaGiven,
+      payload.handoverPhoto,
+      payload.note?.trim() || null,
+    ]
   );
-  return rows[0] ? mapSubmission(rows[0]) : null;
+  return mapPickup(rows[0]);
 }
 
-export async function rejectSubmission(
-  submissionId: string,
-  wd2Id: string,
-  reason: string
-): Promise<GraduationSubmissionRecord | null> {
+export type PickupQueueItem = PickupRecord & {
+  mahasiswaNpm: string;
+  mahasiswaName: string;
+  payments: PaymentsByKind;
+};
+
+export async function listPickups(
+  status?: "pending" | "valid" | "issue"
+): Promise<PickupQueueItem[]> {
   await ensureGraduationSchema();
-  const rows = await query<GraduationSubmissionRow>(
-    `update graduation_submissions
-     set payment_status='rejected', payment_reviewed_by=$1, payment_reviewed_at=now(),
-         payment_reject_reason=$2, updated_at=now()
-     where id=$3
-     returning *`,
-    [wd2Id, reason, submissionId]
+  const rows = await query<PickupRow & { npm: string; name: string }>(
+    `select gp.*, m.npm, m.name
+     from graduation_pickups gp
+     join graduation_submissions gs on gs.id = gp.submission_id
+     join mahasiswa m on m.id = gs.mahasiswa_id
+     ${status ? "where gp.wd2_check_status = $1" : ""}
+     order by gp.handed_at desc`,
+    status ? [status] : []
   );
-  return rows[0] ? mapSubmission(rows[0]) : null;
+  const items: PickupQueueItem[] = [];
+  for (const row of rows) {
+    items.push({
+      ...mapPickup(row),
+      mahasiswaNpm: row.npm,
+      mahasiswaName: row.name,
+      payments: await getPayments(row.submission_id),
+    });
+  }
+  return items;
+}
+
+export async function checkPickup(
+  pickupId: string,
+  reviewer: { type: ReviewerType; id: string },
+  outcome: "valid" | "issue",
+  note?: string | null
+): Promise<PickupRecord | null> {
+  await ensureGraduationSchema();
+  const rows = await query<PickupRow>(
+    `update graduation_pickups
+     set wd2_check_status=$2, wd2_check_by_type=$3, wd2_check_by=$4, wd2_check_at=now(), wd2_check_note=$5
+     where id=$1
+     returning *`,
+    [pickupId, outcome, reviewer.type, reviewer.id, note?.trim() || null]
+  );
+  const pickup = rows[0] ? mapPickup(rows[0]) : null;
+  if (pickup && outcome === "valid") {
+    await query(
+      `update graduation_payments
+       set status='approved', reviewed_by_type=$2, reviewed_by=$3, reviewed_at=now(), updated_at=now()
+       where submission_id=$1 and status='desk'`,
+      [pickup.submissionId, reviewer.type, reviewer.id]
+    );
+  }
+  return pickup;
+}
+
+// ─── Desk lookup & rekap ────────────────────────────────────────────────────
+
+export type DeskStudent = {
+  mahasiswaId: string;
+  npm: string;
+  name: string;
+  email: string | null;
+  submissionId: string | null;
+  yudisiumStatus: YudisiumStatus | null;
+  fakultasStatus: PaymentStatus | null;
+  univStatus: PaymentStatus | null;
+  pickedUp: boolean;
+  handedAt: string | null;
+  undanganGiven: boolean;
+  togaGiven: boolean;
+  checkStatus: "pending" | "valid" | "issue" | null;
+  checkNote: string | null;
+};
+
+type DeskRow = {
+  mahasiswa_id: string;
+  npm: string;
+  name: string;
+  email: string | null;
+  submission_id: string | null;
+  yudisium_status: YudisiumStatus | null;
+  fakultas_status: PaymentStatus | null;
+  univ_status: PaymentStatus | null;
+  handed_at: string | null;
+  undangan_given: boolean | null;
+  toga_given: boolean | null;
+  check_status: "pending" | "valid" | "issue" | null;
+  check_note: string | null;
+};
+
+const DESK_SELECT = `
+  select m.id as mahasiswa_id, m.npm, m.name, m.email,
+         gs.id as submission_id, gs.yudisium_status,
+         (select status from graduation_payments where submission_id = gs.id and kind='fakultas') as fakultas_status,
+         (select status from graduation_payments where submission_id = gs.id and kind='univ') as univ_status,
+         gp.handed_at, gp.undangan_given, gp.toga_given,
+         gp.wd2_check_status as check_status, gp.wd2_check_note as check_note
+  from mahasiswa m
+  left join graduation_submissions gs on gs.mahasiswa_id = m.id and gs.event_id = $1
+  left join graduation_pickups gp on gp.submission_id = gs.id
+`;
+
+const mapDesk = (row: DeskRow): DeskStudent => ({
+  mahasiswaId: row.mahasiswa_id,
+  npm: row.npm,
+  name: row.name,
+  email: row.email,
+  submissionId: row.submission_id,
+  yudisiumStatus: row.yudisium_status,
+  fakultasStatus: row.fakultas_status,
+  univStatus: row.univ_status,
+  pickedUp: Boolean(row.handed_at),
+  handedAt: row.handed_at,
+  undanganGiven: Boolean(row.undangan_given),
+  togaGiven: Boolean(row.toga_given),
+  checkStatus: row.check_status,
+  checkNote: row.check_note,
+});
+
+export async function searchDeskStudents(eventId: string, q: string): Promise<DeskStudent[]> {
+  await ensureGraduationSchema();
+  const term = `%${q.trim()}%`;
+  const rows = await query<DeskRow>(
+    `${DESK_SELECT} where m.npm ilike $2 or m.name ilike $2 order by m.name asc limit 20`,
+    [eventId, term]
+  );
+  return rows.map(mapDesk);
+}
+
+/** Everyone who has a submission (registered) or a pickup for this event. */
+export async function listDeskRekap(eventId: string): Promise<DeskStudent[]> {
+  await ensureGraduationSchema();
+  const rows = await query<DeskRow>(
+    `${DESK_SELECT} where gs.id is not null order by gp.handed_at desc nulls last, m.name asc`,
+    [eventId]
+  );
+  return rows.map(mapDesk);
 }
 
 // ─── Notifications ──────────────────────────────────────────────────────────

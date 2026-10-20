@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { GraduationCap, Loader2, Copy, CheckCircle2 } from "lucide-react";
+import { CheckCircle2, Copy, GraduationCap, Loader2 } from "lucide-react";
+import { Eyebrow, GlassCard } from "@/components/glass";
 
 type EventInfo = {
   name: string;
@@ -12,13 +13,13 @@ type EventInfo = {
   yudisiumVenue: string | null;
   yudisiumDresscode: string | null;
   wisudaDresscode: string | null;
+  univSchedule: string | null;
+  univVenue: string | null;
 };
 
 type RundownInfo = {
   order: number;
   timeStart: string | null;
-  timeEnd: string | null;
-  durationMinutes: number | null;
   title: string;
 };
 
@@ -28,7 +29,6 @@ export default function DaftarMahasiswaPage() {
   const [error, setError] = useState<string | null>(null);
   const [password, setPassword] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-
   const [eventInfo, setEventInfo] = useState<EventInfo | null>(null);
   const [rundown, setRundown] = useState<RundownInfo[]>([]);
 
@@ -71,32 +71,23 @@ export default function DaftarMahasiswaPage() {
 
   if (password) {
     return (
-      <div className="min-h-screen bg-[#F8FAF9] flex items-center justify-center px-5 py-10">
-        <div className="w-full max-w-sm rounded-3xl bg-white border border-slate-100 p-6 shadow-sm text-center">
-          <CheckCircle2 className="mx-auto text-emerald-500 mb-3" size={40} />
-          <h1 className="text-lg font-bold text-[#1A1A2E]">Pendaftaran Berhasil</h1>
-          <p className="text-sm text-slate-500 mt-1 mb-4">
-            Simpan password berikut baik-baik. Password ini <strong>hanya ditampilkan sekali</strong>.
+      <div className="glass-bg flex items-center justify-center px-5">
+        <div className="glass-card-strong glass-enter w-full max-w-sm p-7 text-center">
+          <CheckCircle2 className="mx-auto text-emerald-500 mb-3" size={44} />
+          <h1 className="text-2xl font-extrabold text-[#11291f]">Pendaftaran Berhasil</h1>
+          <p className="text-sm text-slate-600 mt-2 mb-5">
+            Simpan password ini baik-baik. Password <strong>hanya ditampilkan sekali</strong>.
           </p>
-          <div className="flex items-center gap-2 bg-[#F8FAF9] border border-dashed border-slate-300 rounded-xl px-4 py-3">
-            <span className="flex-1 font-mono text-lg font-bold text-[#1B4332] tracking-wider">
-              {password}
-            </span>
-            <button
-              onClick={handleCopy}
-              className="shrink-0 p-2 rounded-lg hover:bg-white text-slate-500"
-              title="Salin"
-            >
-              {copied ? <CheckCircle2 size={18} className="text-emerald-500" /> : <Copy size={18} />}
+          <div className="glass-inset flex items-center gap-2 px-4 py-3">
+            <span className="flex-1 font-mono text-xl font-bold text-[#1B4332] tracking-wider">{password}</span>
+            <button onClick={handleCopy} className="p-2 rounded-xl text-slate-500" aria-label="Salin password">
+              {copied ? <CheckCircle2 size={20} className="text-emerald-500" /> : <Copy size={20} />}
             </button>
           </div>
-          <p className="text-xs text-amber-600 mt-3">
-            Lupa password nanti? Hubungi panitia untuk direset — pendaftaran ulang dengan NPM yang sama tidak diperbolehkan.
+          <p className="text-xs text-amber-700 mt-3">
+            Lupa password? Hubungi panitia untuk direset — pendaftaran ulang dengan NPM yang sama tidak diperbolehkan.
           </p>
-          <Link
-            href="/mahasiswa/login"
-            className="mt-5 inline-flex w-full items-center justify-center rounded-xl bg-[#1B4332] text-white text-sm font-semibold py-3 hover:bg-[#40916C] transition-colors"
-          >
+          <Link href="/mahasiswa/login" className="glass-btn glass-btn-primary mt-5 w-full flex items-center justify-center">
             Masuk Sekarang
           </Link>
         </div>
@@ -105,123 +96,106 @@ export default function DaftarMahasiswaPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#F8FAF9] px-5 py-10">
-      <div className="w-full max-w-sm mx-auto space-y-4">
+    <div className="glass-bg">
+      <div className="w-full max-w-md mx-auto px-5 pt-8 space-y-4">
+        <div>
+          <div className="glass-card !rounded-2xl inline-flex p-3 mb-4">
+            <GraduationCap className="text-[#1B4332]" size={26} />
+          </div>
+          <h1 className="glass-title">Pendaftaran Mahasiswa</h1>
+          <p className="text-sm text-slate-600 mt-2">Konfirmasi yudisium &amp; wisuda Fakultas Teknik</p>
+        </div>
+
         {eventInfo && (
-          <div className="rounded-3xl bg-white border border-slate-100 p-6 shadow-sm">
-            <p className="text-xs font-bold uppercase tracking-[2px] text-[#40916C] mb-1">Acara</p>
-            <h2 className="text-base font-bold text-[#1A1A2E] mb-3">{eventInfo.name}</h2>
+          <GlassCard strong>
+            <Eyebrow>Acara</Eyebrow>
+            <h2 className="text-base font-bold text-[#11291f] mb-4 leading-snug">{eventInfo.name}</h2>
 
             {(eventInfo.yudisiumSchedule || eventInfo.yudisiumVenue || eventInfo.yudisiumDresscode) && (
-              <div className="mb-3 pb-3 border-b border-slate-100">
-                <p className="text-xs font-semibold text-[#1B4332] mb-1">Yudisium</p>
-                {eventInfo.yudisiumSchedule && <p className="text-sm text-slate-600">🗓️ {eventInfo.yudisiumSchedule}</p>}
-                {eventInfo.yudisiumVenue && <p className="text-sm text-slate-600">📍 {eventInfo.yudisiumVenue}</p>}
-                {eventInfo.yudisiumDresscode && <p className="text-xs text-slate-400">👔 {eventInfo.yudisiumDresscode}</p>}
+              <div className="glass-inset p-3 mb-3 space-y-1">
+                <p className="text-xs font-bold text-[#1B4332]">Yudisium</p>
+                {eventInfo.yudisiumSchedule && <p className="text-sm text-slate-700">🗓️ {eventInfo.yudisiumSchedule}</p>}
+                {eventInfo.yudisiumVenue && <p className="text-sm text-slate-700">📍 {eventInfo.yudisiumVenue}</p>}
+                {eventInfo.yudisiumDresscode && <p className="text-xs text-slate-500">👔 {eventInfo.yudisiumDresscode}</p>}
               </div>
             )}
 
-            <div>
-              <p className="text-xs font-semibold text-[#1B4332] mb-1">Wisuda Pelepasan</p>
-              <p className="text-sm text-slate-600">🗓️ {eventInfo.schedule}</p>
-              <p className="text-sm text-slate-600">📍 {eventInfo.venue}</p>
-              {eventInfo.wisudaDresscode && <p className="text-xs text-slate-400">👔 {eventInfo.wisudaDresscode}</p>}
+            <div className="glass-inset p-3 mb-3 space-y-1">
+              <p className="text-xs font-bold text-[#1B4332]">Wisuda Pelepasan Fakultas</p>
+              <p className="text-sm text-slate-700">🗓️ {eventInfo.schedule}</p>
+              <p className="text-sm text-slate-700">📍 {eventInfo.venue}</p>
+              {eventInfo.wisudaDresscode && <p className="text-xs text-slate-500">👔 {eventInfo.wisudaDresscode}</p>}
             </div>
 
+            {(eventInfo.univSchedule || eventInfo.univVenue) && (
+              <div className="glass-inset p-3 space-y-1">
+                <p className="text-xs font-bold text-[#1B4332]">Wisuda Universitas</p>
+                {eventInfo.univSchedule && <p className="text-sm text-slate-700">🗓️ {eventInfo.univSchedule}</p>}
+                {eventInfo.univVenue && <p className="text-sm text-slate-700">📍 {eventInfo.univVenue}</p>}
+              </div>
+            )}
+
             {rundown.length > 0 && (
-              <details className="mt-3 pt-3 border-t border-slate-100">
-                <summary className="text-xs font-semibold text-[#40916C] cursor-pointer">Lihat Susunan Acara</summary>
-                <div className="mt-2 space-y-1.5">
+              <details className="mt-4">
+                <summary className="text-sm font-semibold text-[#1B4332] cursor-pointer">Lihat Susunan Acara</summary>
+                <div className="mt-3 space-y-2">
                   {rundown.map((item) => (
-                    <div key={item.order} className="flex gap-2 text-xs">
-                      <span className="shrink-0 font-semibold text-[#1B4332] w-12">{item.timeStart ?? "-"}</span>
-                      <span className="text-slate-600">{item.title}</span>
+                    <div key={item.order} className="flex gap-3 text-sm">
+                      <span className="shrink-0 w-14 font-bold text-[#1B4332]">{item.timeStart ?? "-"}</span>
+                      <span className="text-slate-700">{item.title}</span>
                     </div>
                   ))}
                 </div>
               </details>
             )}
-          </div>
+          </GlassCard>
         )}
 
-      <div className="w-full rounded-3xl bg-white border border-slate-100 p-6 shadow-sm">
-        <div className="text-center mb-6">
-          <GraduationCap className="mx-auto text-[#1B4332] mb-2" size={36} />
-          <h1 className="text-lg font-bold text-[#1A1A2E]">Pendaftaran Mahasiswa</h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Konfirmasi kehadiran yudisium &amp; wisuda pelepasan Fakultas Teknik
+        <GlassCard strong>
+          <form onSubmit={handleSubmit} className="space-y-3">
+            <input
+              required
+              autoComplete="name"
+              placeholder="Nama lengkap (sesuai data akademik)"
+              value={form.name}
+              onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+              className="glass-input"
+            />
+            <input
+              required
+              inputMode="numeric"
+              placeholder="NPM"
+              value={form.npm}
+              onChange={(e) => setForm((f) => ({ ...f, npm: e.target.value }))}
+              className="glass-input"
+            />
+            <input
+              required
+              type="email"
+              autoComplete="email"
+              placeholder="Email"
+              value={form.email}
+              onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
+              className="glass-input"
+            />
+            {error && <p className="glass-inset px-4 py-3 text-sm text-rose-700">{error}</p>}
+            <button
+              type="submit"
+              disabled={loading}
+              className="glass-btn glass-btn-primary w-full flex items-center justify-center gap-2"
+            >
+              {loading && <Loader2 size={16} className="animate-spin" />}
+              Daftar
+            </button>
+          </form>
+          <p className="text-center text-sm text-slate-600 mt-4">
+            Sudah punya akun?{" "}
+            <Link href="/mahasiswa/login" className="font-semibold text-[#1B4332]">
+              Masuk
+            </Link>
           </p>
-        </div>
-        <form onSubmit={handleSubmit} className="space-y-3">
-          <Field
-            label="Nama Lengkap"
-            value={form.name}
-            onChange={(v) => setForm((f) => ({ ...f, name: v }))}
-            placeholder="Sesuai data akademik"
-          />
-          <Field
-            label="NPM"
-            value={form.npm}
-            onChange={(v) => setForm((f) => ({ ...f, npm: v }))}
-            placeholder="Nomor Pokok Mahasiswa"
-          />
-          <Field
-            label="Email"
-            type="email"
-            value={form.email}
-            onChange={(v) => setForm((f) => ({ ...f, email: v }))}
-            placeholder="email@contoh.com"
-          />
-          {error && (
-            <p className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm text-rose-700">
-              {error}
-            </p>
-          )}
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full flex items-center justify-center gap-2 rounded-xl bg-[#1B4332] text-white text-sm font-semibold py-3 hover:bg-[#40916C] disabled:opacity-60 transition-colors"
-          >
-            {loading && <Loader2 size={16} className="animate-spin" />}
-            Daftar
-          </button>
-        </form>
-        <p className="text-center text-xs text-slate-400 mt-4">
-          Sudah punya akun?{" "}
-          <Link href="/mahasiswa/login" className="text-[#40916C] font-semibold">
-            Masuk di sini
-          </Link>
-        </p>
-      </div>
+        </GlassCard>
       </div>
     </div>
-  );
-}
-
-function Field({
-  label,
-  value,
-  onChange,
-  placeholder,
-  type = "text",
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  placeholder?: string;
-  type?: string;
-}) {
-  return (
-    <label className="block">
-      <span className="text-xs font-semibold text-slate-600">{label}</span>
-      <input
-        type={type}
-        required
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm text-[#1A1A2E] placeholder:text-slate-400 focus:border-[#1B4332] focus:outline-none"
-      />
-    </label>
   );
 }

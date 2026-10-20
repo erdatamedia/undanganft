@@ -6,6 +6,5 @@ export default async function MahasiswaLayout({
   children: React.ReactNode;
 }) {
   await requireMahasiswa();
-
-  return <div className="min-h-screen bg-[#F8FAF9]">{children}</div>;
+  return <>{children}</>;
 }
