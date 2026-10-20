@@ -7,6 +7,10 @@ import { ArrowLeft, FileText, Loader2, Plus, ShieldCheck, Trash2, Upload, Users 
 
 type Eligible = { id: string; npm: string; name: string; program: string | null };
 type VRow = { npm: string; name: string; program: string | null; hasPhoto: boolean };
+type Registrant = {
+  mahasiswaId: string; npm: string; name: string; program: string | null;
+  yudisiumStatus: string | null; fakultasStatus: string | null; univStatus: string | null; hasAttendee: boolean;
+};
 type Wd2Account = { id: string; email: string };
 type Doc = { kind: "yudisium" | "wisuda"; filename: string; size: number; updatedAt: string };
 
@@ -28,6 +32,9 @@ export default function YudisiumAdminPage() {
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [importBusy, setImportBusy] = useState(false);
 
+  const [registrants, setRegistrants] = useState<Registrant[]>([]);
+  const [regInfo, setRegInfo] = useState<{ isRegistrationEvent: boolean; registrationEvent: { id: string; name: string } | null; unlinked: number } | null>(null);
+  const [syncBusy, setSyncBusy] = useState(false);
   const [vrows, setVrows] = useState<VRow[]>([]);
   const [docs, setDocs] = useState<Doc[]>([]);
   const [docBusy, setDocBusy] = useState<string | null>(null);
@@ -51,6 +58,12 @@ export default function YudisiumAdminPage() {
       fetch(`/api/wd2-accounts`, { credentials: "include" }),
       fetch(`/api/events/${eventId}/lampiran`, { credentials: "include" }),
     ]);
+    const pRes = await fetch(`/api/events/${eventId}/pendaftar`, { credentials: "include" });
+    if (pRes.ok) {
+      const p = await pRes.json();
+      setRegistrants(p.rows ?? []);
+      setRegInfo({ isRegistrationEvent: p.isRegistrationEvent, registrationEvent: p.registrationEvent, unlinked: p.unlinked });
+    }
     const vRes = await fetch(`/api/events/${eventId}/foto-videotron`, { credentials: "include" });
     if (vRes.ok) setVrows((await vRes.json()).rows ?? []);
     if (docsRes.ok) setDocs((await docsRes.json()).documents ?? []);
@@ -89,6 +102,15 @@ export default function YudisiumAdminPage() {
     if (res.ok) setDocs((await res.json()).documents ?? []);
     else showToast("Gagal menghapus lampiran.", "err");
     setDocBusy(null);
+  };
+
+  const handleSync = async () => {
+    setSyncBusy(true);
+    const res = await fetch(`/api/events/${eventId}/pendaftar`, { method: "POST", credentials: "include" });
+    if (res.ok) showToast(`${(await res.json()).linked} pendaftar ditautkan ke acara ini.`);
+    else showToast("Gagal menautkan pendaftar.", "err");
+    await fetchData();
+    setSyncBusy(false);
   };
 
   const handleAdd = async (e: React.FormEvent) => {
@@ -335,6 +357,47 @@ export default function YudisiumAdminPage() {
                 );
               })}
             </div>
+          </div>
+
+          {/* Pendaftar */}
+          <div className="rounded-2xl bg-white border border-slate-100 p-5">
+            <h3 className="text-sm font-bold text-[#1A1A2E] mb-1">Pendaftar Dashboard ({registrants.length})</h3>
+            {regInfo && !regInfo.isRegistrationEvent && (
+              <p className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                Acara ini <strong>bukan</strong> acara aktif untuk pendaftaran mahasiswa. Pendaftar baru masuk ke:{" "}
+                <strong>{regInfo.registrationEvent?.name ?? "(tidak ada acara ACTIVE)"}</strong>. Ubah status acara lain
+                menjadi non-aktif (COMPLETED/DRAFT) atau jadikan acara ini yang terbaru.
+              </p>
+            )}
+            {regInfo && regInfo.unlinked > 0 && (
+              <div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-800">
+                <span>{regInfo.unlinked} akun mahasiswa belum tertaut ke acara ini.</span>
+                <button
+                  onClick={handleSync}
+                  disabled={syncBusy}
+                  className="shrink-0 rounded-lg bg-[#1B4332] text-white font-semibold px-3 py-1.5 disabled:opacity-50"
+                >
+                  {syncBusy ? "Menautkan…" : "Tautkan ke acara ini"}
+                </button>
+              </div>
+            )}
+            {registrants.length === 0 ? (
+              <p className="text-sm text-slate-400 text-center py-4">Belum ada pendaftar.</p>
+            ) : (
+              <div className="max-h-72 overflow-y-auto divide-y divide-slate-100">
+                {registrants.map((r) => (
+                  <div key={r.mahasiswaId} className="py-2 text-sm flex items-center justify-between gap-2">
+                    <span>
+                      <span className="font-medium text-[#1A1A2E]">{r.name}</span>
+                      <span className="text-slate-400 ml-2">{r.npm}{r.program ? ` · ${r.program}` : ""}</span>
+                    </span>
+                    <span className="text-[11px] text-slate-500 shrink-0">
+                      Yudisium: {r.yudisiumStatus ?? "-"} · Fak: {r.fakultasStatus ?? "-"} · Univ: {r.univStatus ?? "-"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Foto videotron */}

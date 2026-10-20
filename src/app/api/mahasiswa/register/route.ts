@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { enrollMahasiswaInEvent } from "@/lib/graduation-flow";
 import { registerMahasiswa } from "@/lib/mahasiswa-auth";
 
 export async function POST(request: Request) {
@@ -16,11 +17,12 @@ export async function POST(request: Request) {
   }
 
   try {
-    const { password } = await registerMahasiswa({
+    const { password, mahasiswa, eventId } = await registerMahasiswa({
       npm: body.npm,
       name: body.name,
       email: body.email,
     });
+    await enrollMahasiswaInEvent(eventId, mahasiswa.id);
     return NextResponse.json({
       message: "Pendaftaran berhasil. Simpan password berikut, ini hanya ditampilkan sekali.",
       password,

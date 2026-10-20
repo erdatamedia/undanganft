@@ -1,5 +1,6 @@
 import {
   findEligible,
+  getOrCreateSubmission,
   getMahasiswaById,
   setSubmissionAttendee,
   type GraduationSubmissionRecord,
@@ -39,4 +40,11 @@ export async function ensureAttendeeForSubmission(
   );
   await setSubmissionAttendee(submission.id, attendee.id);
   return attendee;
+}
+
+/** Registers the mahasiswa into the event: submission + attendee (draft), reusing imported rows. */
+export async function enrollMahasiswaInEvent(eventId: string, mahasiswaId: string) {
+  const submission = await getOrCreateSubmission(eventId, mahasiswaId);
+  await ensureAttendeeForSubmission(submission);
+  return submission;
 }

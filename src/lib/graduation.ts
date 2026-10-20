@@ -1152,3 +1152,51 @@ export async function listVideotron(eventId: string): Promise<VideotronRow[]> {
   );
   return rows.map((r) => ({ npm: r.npm, name: r.name, program: r.program, hasPhoto: r.has_photo }));
 }
+
+// ─── Pendaftar per acara ────────────────────────────────────────────────────
+
+export type RegistrantRow = {
+  mahasiswaId: string;
+  npm: string;
+  name: string;
+  program: string | null;
+  yudisiumStatus: string | null;
+  fakultasStatus: string | null;
+  univStatus: string | null;
+  hasAttendee: boolean;
+};
+
+export async function listRegistrants(eventId: string): Promise<RegistrantRow[]> {
+  await ensureGraduationSchema();
+  const rows = await query<{
+    mahasiswa_id: string; npm: string; name: string; program: string | null;
+    yudisium_status: string | null; fakultas: string | null; univ: string | null; has_attendee: boolean;
+  }>(
+    `select gs.mahasiswa_id, m.npm, m.name, el.program, gs.yudisium_status,
+            (select status from graduation_payments where submission_id=gs.id and kind='fakultas') as fakultas,
+            (select status from graduation_payments where submission_id=gs.id and kind='univ') as univ,
+            (gs.attendee_id is not null) as has_attendee
+       from graduation_submissions gs
+       join mahasiswa m on m.id=gs.mahasiswa_id
+       left join mahasiswa_eligible el on el.event_id=gs.event_id and el.npm=m.npm
+      where gs.event_id=$1
+      order by gs.created_at desc`,
+    [eventId]
+  );
+  return rows.map((r) => ({
+    mahasiswaId: r.mahasiswa_id, npm: r.npm, name: r.name, program: r.program,
+    yudisiumStatus: r.yudisium_status, fakultasStatus: r.fakultas, univStatus: r.univ,
+    hasAttendee: r.has_attendee,
+  }));
+}
+
+/** Daftar mahasiswa yang belum punya pengajuan di acara ini (pendaftar lama / acara lain). */
+export async function listMahasiswaWithoutSubmission(eventId: string): Promise<string[]> {
+  await ensureGraduationSchema();
+  const rows = await query<{ id: string }>(
+    `select m.id from mahasiswa m
+      where not exists (select 1 from graduation_submissions gs where gs.event_id=$1 and gs.mahasiswa_id=m.id)`,
+    [eventId]
+  );
+  return rows.map((r) => r.id);
+}
