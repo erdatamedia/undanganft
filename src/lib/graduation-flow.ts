@@ -1,5 +1,7 @@
 import {
+  findActiveEvent,
   findEligible,
+  listMahasiswaWithoutSubmission,
   getOrCreateSubmission,
   getMahasiswaById,
   setSubmissionAttendee,
@@ -47,4 +49,13 @@ export async function enrollMahasiswaInEvent(eventId: string, mahasiswaId: strin
   const submission = await getOrCreateSubmission(eventId, mahasiswaId);
   await ensureAttendeeForSubmission(submission);
   return submission;
+}
+
+/** Pendaftar yang belum tertaut otomatis masuk, tapi hanya untuk acara aktif pendaftaran. */
+export async function syncRegistrantsToEvent(eventId: string): Promise<number> {
+  const active = await findActiveEvent();
+  if (!active || active.eventId !== eventId) return 0;
+  const ids = await listMahasiswaWithoutSubmission(eventId);
+  for (const id of ids) await enrollMahasiswaInEvent(eventId, id);
+  return ids.length;
 }

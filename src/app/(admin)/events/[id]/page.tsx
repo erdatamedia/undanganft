@@ -285,16 +285,16 @@ function PesertaTab({
   const [defaultSeat, setDefaultSeat] = useState("-");
 
   const filtered = useMemo(() => {
-    const term = search.toLowerCase().trim();
+    const terms = search.toLowerCase().split(/\s+/).filter(Boolean);
     return [...attendees]
       .sort((a, b) => {
         if (a.status === b.status) return a.name.localeCompare(b.name);
         return statusOrder.indexOf(a.status) - statusOrder.indexOf(b.status);
       })
       .filter((a) => {
-        const matchSearch = term
-          ? [a.name, a.program, a.email, a.npm, a.id].some((v) => v.toLowerCase().includes(term))
-          : true;
+        // Semua kata kunci harus cocok (nama/prodi/email/NPM). ID tidak dicari: berisi UUID acara sehingga selalu "cocok".
+        const haystack = [a.name, a.program, a.email, a.npm].map((v) => (v ?? "").toLowerCase()).join(" ");
+        const matchSearch = terms.every((t) => haystack.includes(t));
         const matchStatus = statusFilter === "all" ? true : a.status === statusFilter;
         return matchSearch && matchStatus;
       });

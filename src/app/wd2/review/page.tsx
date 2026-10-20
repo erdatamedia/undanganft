@@ -240,6 +240,7 @@ export default function Wd2ReviewPage() {
       <img
         src={src}
         alt={title}
+        loading="lazy"
         onClick={onClick ?? (() => setPreview({ type: "photo", src, title }))}
         className="w-20 h-20 object-cover rounded-2xl border border-white/80 shadow-sm cursor-zoom-in shrink-0"
       />

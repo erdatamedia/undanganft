@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getUserFromSession } from "@/lib/auth";
 import { resolveEvent } from "@/lib/event";
+import { syncRegistrantsToEvent } from "@/lib/graduation-flow";
 import {
   addAttendee,
   readAttendees,
@@ -15,6 +16,7 @@ export async function GET(req: Request) {
 
   const url = new URL(req.url);
   const selectedEvent = await resolveEvent(url.searchParams.get("eventId"));
+  await syncRegistrantsToEvent(selectedEvent.id).catch(() => {});
   const attendees = await readAttendees(selectedEvent.id);
   return NextResponse.json({ event: selectedEvent, attendees });
 }
