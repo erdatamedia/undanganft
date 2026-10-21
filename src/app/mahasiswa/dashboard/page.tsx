@@ -27,6 +27,8 @@ type PaymentView = {
   status: "none" | "pending" | "approved" | "rejected" | "desk";
   rejectReason: string | null;
   source: "mahasiswa" | "admin_desk";
+  hasProof?: boolean;
+  uploadedAt?: string | null;
 } | null;
 
 type Submission = {
@@ -202,7 +204,7 @@ export default function MahasiswaDashboardPage() {
   const renderPayment = (kind: PaymentKind) => {
     const p = payments[kind];
     const status = p?.status ?? "none";
-    const uploadable = status === "none" || status === "rejected";
+    const uploadable = status === "none" || status === "rejected" || status === "pending";
     return (
       <div className="space-y-3">
         {status === "pending" && (
@@ -228,6 +230,27 @@ export default function MahasiswaDashboardPage() {
             </span>
           </div>
         )}
+        {p?.hasProof && status !== "none" && (
+          <a
+            href={`/api/mahasiswa/submission/payment-proof?kind=${kind}&v=${encodeURIComponent(p.uploadedAt ?? "")}`}
+            target="_blank"
+            rel="noreferrer"
+            className="block"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={`/api/mahasiswa/submission/payment-proof?kind=${kind}&v=${encodeURIComponent(p.uploadedAt ?? "")}`}
+              alt="Bukti bayar yang Anda unggah"
+              loading="lazy"
+              className="max-h-48 w-full rounded-2xl object-cover border border-white/70"
+            />
+          </a>
+        )}
+        {(status === "approved" || status === "desk") && (
+          <p className="text-[11px] text-slate-500">
+            Bukti sudah diverifikasi. Jika salah unggah, hubungi panitia.
+          </p>
+        )}
         {uploadable && (
           <>
             <button
@@ -235,7 +258,7 @@ export default function MahasiswaDashboardPage() {
               disabled={busy}
               className="glass-btn glass-btn-soft w-full flex items-center justify-center gap-2 border-dashed"
             >
-              <Upload size={16} /> Unggah Foto Bukti Bayar
+              <Upload size={16} /> {status === "pending" ? "Ganti Foto (salah unggah)" : "Unggah Foto Bukti Bayar"}
             </button>
             <input
               ref={(el) => {

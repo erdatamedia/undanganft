@@ -35,10 +35,10 @@ export async function GET() {
     mahasiswa: mhs,
     payments: {
       fakultas: payments.fakultas
-        ? { id: payments.fakultas.id, status: payments.fakultas.status, rejectReason: payments.fakultas.rejectReason, source: payments.fakultas.source }
+        ? { id: payments.fakultas.id, status: payments.fakultas.status, rejectReason: payments.fakultas.rejectReason, source: payments.fakultas.source, hasProof: Boolean(payments.fakultas.proof), uploadedAt: payments.fakultas.uploadedAt }
         : null,
       univ: payments.univ
-        ? { id: payments.univ.id, status: payments.univ.status, rejectReason: payments.univ.rejectReason, source: payments.univ.source }
+        ? { id: payments.univ.id, status: payments.univ.status, rejectReason: payments.univ.rejectReason, source: payments.univ.source, hasProof: Boolean(payments.univ.proof), uploadedAt: payments.univ.uploadedAt }
         : null,
     },
     pickup: pickup

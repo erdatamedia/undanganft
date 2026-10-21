@@ -66,3 +66,23 @@ export async function POST(request: Request) {
 
   return NextResponse.json({ payments: await getPayments(submission.id) });
 }
+
+/** Pemilik melihat kembali bukti yang diunggahnya (untuk memeriksa sebelum diganti). */
+export async function GET(request: Request) {
+  const mhs = await getMahasiswaFromSession();
+  if (!mhs) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+  const active = await findActiveEvent();
+  if (!active) return NextResponse.json({ message: "Tidak ada acara aktif." }, { status: 404 });
+
+  const kindRaw = new URL(request.url).searchParams.get("kind");
+  if (kindRaw !== "fakultas" && kindRaw !== "univ") {
+    return NextResponse.json({ message: "Jenis bukti tidak valid." }, { status: 400 });
+  }
+  const submission = await getOrCreateSubmission(active.eventId, mhs.id);
+  const proof = (await getPayments(submission.id))[kindRaw]?.proof ?? "";
+  const match = proof.match(/^data:(image\/[a-z+]+);base64,(.+)$/);
+  if (!match) return NextResponse.json({ message: "Belum ada bukti." }, { status: 404 });
+  return new NextResponse(new Uint8Array(Buffer.from(match[2], "base64")), {
+    headers: { "Content-Type": match[1], "Cache-Control": "private, no-store" },
+  });
+}
