@@ -77,6 +77,8 @@ const badge = (text: string, tone: "ok" | "wait" | "bad" | "muted") => {
   return <span className={`px-2 py-0.5 rounded-full text-[11px] font-semibold ${cls}`}>{text}</span>;
 };
 
+const hasOwnProof = (status: string | null) => status === "pending" || status === "approved" || status === "desk";
+
 const payTone = (s: string | null): "ok" | "wait" | "bad" | "muted" =>
   s === "approved" ? "ok" : s === "desk" || s === "pending" ? "wait" : s === "rejected" ? "bad" : "muted";
 
@@ -104,6 +106,7 @@ export default function PengambilanPage() {
   const [undanganGiven, setUndanganGiven] = useState(true);
   const [togaGiven, setTogaGiven] = useState(true);
   const [skipUniv, setSkipUniv] = useState(false);
+  const [skipFakultas, setSkipFakultas] = useState(false);
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<{ msg: string; type: "ok" | "err" } | null>(null);
@@ -268,10 +271,19 @@ export default function PengambilanPage() {
   };
 
   // Mahasiswa hasil impor Excel belum punya akun: buatkan otomatis saat dipilih.
+  const selectStudent = (st: Student) => {
+    setSelected(st);
+    setSkipFakultas(hasOwnProof(st.fakultasStatus));
+    setSkipUniv(hasOwnProof(st.univStatus));
+    setActiveSlot(
+      !hasOwnProof(st.fakultasStatus) ? "fakultas" : !hasOwnProof(st.univStatus) ? "univ" : "handover"
+    );
+  };
+
   const pickStudent = async (s: Student) => {
     setResults([]);
     if (s.mahasiswaId) {
-      setSelected(s);
+      selectStudent(s);
       return;
     }
     setRegBusy(true);
@@ -285,7 +297,7 @@ export default function PengambilanPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.message ?? "Gagal membuat akun mahasiswa");
       setNewPassword(data.password);
-      setSelected({ ...s, mahasiswaId: data.mahasiswa.id, email: data.mahasiswa.email ?? null });
+      selectStudent({ ...s, mahasiswaId: data.mahasiswa.id, email: data.mahasiswa.email ?? null });
     } catch (err) {
       showToast((err as Error).message, "err");
     } finally {
@@ -299,6 +311,7 @@ export default function PengambilanPage() {
     setActiveSlot("fakultas");
     setNote("");
     setSkipUniv(false);
+    setSkipFakultas(false);
     setUndanganGiven(true);
     setTogaGiven(true);
     setNewPassword(null);
@@ -308,9 +321,9 @@ export default function PengambilanPage() {
 
   const canSave =
     selected?.mahasiswaId &&
-    photos.fakultas &&
+    (skipFakultas ? hasOwnProof(selected.fakultasStatus) || note.trim() : photos.fakultas) &&
     photos.handover &&
-    (skipUniv ? note.trim() : photos.univ) &&
+    (skipUniv ? hasOwnProof(selected.univStatus) || note.trim() : photos.univ) &&
     (undanganGiven || togaGiven);
 
   const handleSave = async () => {
@@ -323,12 +336,13 @@ export default function PengambilanPage() {
         credentials: "include",
         body: JSON.stringify({
           mahasiswaId: selected.mahasiswaId,
-          fakultas: photos.fakultas,
+          fakultas: skipFakultas ? undefined : photos.fakultas,
           univ: skipUniv ? undefined : photos.univ,
           handover: photos.handover,
           undanganGiven,
           togaGiven,
           skipUniv,
+          skipFakultas,
           note,
         }),
       });
@@ -543,7 +557,7 @@ export default function PengambilanPage() {
 
           <div className="grid grid-cols-3 gap-3">
             {SLOTS.map((slot) => {
-              const disabled = slot.key === "univ" && skipUniv;
+              const disabled = (slot.key === "univ" && skipUniv) || (slot.key === "fakultas" && skipFakultas);
               return (
                 <button
                   key={slot.key}
@@ -591,8 +605,15 @@ export default function PengambilanPage() {
               Toga diserahkan
             </label>
             <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input type="checkbox" checked={skipFakultas} onChange={(e) => setSkipFakultas(e.target.checked)} />
+              Lewati bukti fakultas{" "}
+              {selected && hasOwnProof(selected.fakultasStatus)
+                ? "(mahasiswa sudah unggah sendiri)"
+                : "(wajib isi catatan)"}
+            </label>
+            <label className="flex items-center gap-2 text-sm text-slate-700">
               <input type="checkbox" checked={skipUniv} onChange={(e) => setSkipUniv(e.target.checked)} />
-              Lewati bukti univ (wajib isi catatan)
+              Lewati bukti univ {selected && hasOwnProof(selected.univStatus) ? "(mahasiswa sudah unggah sendiri)" : "(wajib isi catatan)"}
             </label>
             <textarea
               value={note}

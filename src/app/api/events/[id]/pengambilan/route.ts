@@ -4,6 +4,7 @@ import {
   createNotification,
   getMahasiswaById,
   getOrCreateSubmission,
+  getPayments,
   notifyAllWd2,
   searchDeskStudents,
   upsertDeskPayment,
@@ -58,20 +59,12 @@ export async function POST(
     undanganGiven?: boolean;
     togaGiven?: boolean;
     skipUniv?: boolean;
+    skipFakultas?: boolean;
     note?: string;
   };
 
   if (!body.mahasiswaId) {
     return NextResponse.json({ message: "Mahasiswa belum dipilih." }, { status: 400 });
-  }
-  if (!validPhoto(body.fakultas)) {
-    return NextResponse.json({ message: "Foto bukti bayar fakultas wajib (maks ~2MB)." }, { status: 400 });
-  }
-  if (!body.skipUniv && !validPhoto(body.univ)) {
-    return NextResponse.json({ message: "Foto bukti bayar univ wajib (maks ~2MB)." }, { status: 400 });
-  }
-  if (body.skipUniv && !body.note?.trim()) {
-    return NextResponse.json({ message: "Catatan wajib diisi bila bukti univ dilewati." }, { status: 400 });
   }
   if (!validPhoto(body.handover)) {
     return NextResponse.json({ message: "Foto serah-terima wajib (maks ~2MB)." }, { status: 400 });
@@ -86,7 +79,30 @@ export async function POST(
   }
 
   const submission = await getOrCreateSubmission(eventId, mahasiswa.id);
-  await upsertDeskPayment(submission.id, "fakultas", body.fakultas, user.id);
+
+  // Bukti yang sudah diunggah mahasiswa sendiri boleh dilewati di meja (tetap diverifikasi WD2).
+  const existing = await getPayments(submission.id);
+  const hasOwnProof = (kind: "fakultas" | "univ") =>
+    Boolean(existing[kind]?.proof) && existing[kind]?.status !== "rejected";
+
+  if (body.skipFakultas) {
+    if (!hasOwnProof("fakultas") && !body.note?.trim()) {
+      return NextResponse.json({ message: "Catatan wajib diisi bila bukti fakultas dilewati (mahasiswa belum mengunggah)." }, { status: 400 });
+    }
+  } else if (!validPhoto(body.fakultas)) {
+    return NextResponse.json({ message: "Foto bukti bayar fakultas wajib (maks ~2MB)." }, { status: 400 });
+  }
+  if (body.skipUniv) {
+    if (!hasOwnProof("univ") && !body.note?.trim()) {
+      return NextResponse.json({ message: "Catatan wajib diisi bila bukti univ dilewati (mahasiswa belum mengunggah)." }, { status: 400 });
+    }
+  } else if (!validPhoto(body.univ)) {
+    return NextResponse.json({ message: "Foto bukti bayar univ wajib (maks ~2MB)." }, { status: 400 });
+  }
+
+  if (!body.skipFakultas && body.fakultas) {
+    await upsertDeskPayment(submission.id, "fakultas", body.fakultas, user.id);
+  }
   if (!body.skipUniv && body.univ) {
     await upsertDeskPayment(submission.id, "univ", body.univ, user.id);
   }
