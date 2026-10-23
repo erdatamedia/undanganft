@@ -1662,7 +1662,10 @@ export type KonsumsiRow = {
   note: string | null;
 };
 
-/** Mahasiswa yang kedua bukti bayarnya (fakultas & univ) disetujui; opsional sertakan "desk" (verifikasi meja). */
+/**
+ * Mahasiswa yang kedua bukti bayarnya (fakultas & univ) disetujui; opsional sertakan "desk" (verifikasi meja).
+ * Hanya yang masih terdaftar sebagai peserta (attendee) — peserta yang sudah dihapus tidak dihitung.
+ */
 export async function listKonsumsi(eventId: string, includeDesk: boolean): Promise<KonsumsiRow[]> {
   await ensureGraduationSchema();
   const statuses = includeDesk ? ["approved", "desk"] : ["approved"];
@@ -1676,7 +1679,7 @@ export async function listKonsumsi(eventId: string, includeDesk: boolean): Promi
        join graduation_payments pf on pf.submission_id = gs.id and pf.kind = 'fakultas' and pf.status = any($2::text[])
        join graduation_payments pu on pu.submission_id = gs.id and pu.kind = 'univ' and pu.status = any($2::text[])
        left join mahasiswa_eligible el on el.event_id = gs.event_id and el.npm = m.npm
-       left join attendees a on a.id = gs.attendee_id
+       join attendees a on a.id = gs.attendee_id
        left join graduation_pickups gp on gp.submission_id = gs.id
       where gs.event_id = $1
       order by coalesce(el.program, a.program, '~'), m.name`,
