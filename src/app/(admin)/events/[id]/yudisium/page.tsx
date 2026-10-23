@@ -132,13 +132,26 @@ export default function YudisiumAdminPage() {
 
   const handleMerge = async (keep: DupMember, remove: DupMember) => {
     if (!confirm(`Gabungkan "${remove.name}" (${remove.npm}) ke "${keep.name}" (${keep.npm})? Data ${remove.name} yang lain dihapus.`)) return;
-    const res = await fetch(`/api/events/${eventId}/duplikat`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({ keepId: keep.id, removeId: remove.id }),
-    });
-    const data = await res.json().catch(() => ({}));
+    const send = (mergeAccounts: boolean) =>
+      fetch(`/api/events/${eventId}/duplikat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ keepId: keep.id, removeId: remove.id, mergeAccounts }),
+      });
+    let res = await send(false);
+    let data = await res.json().catch(() => ({}));
+    if (res.status === 409 && data.code === "both_linked") {
+      if (
+        !confirm(
+          `Kedua data terhubung ke akun mahasiswa berbeda.\n\nGabungkan juga akunnya? Akun "${remove.name}" (${remove.npm}) dihapus; bukti bayar, serah-terima, dan status yudisiumnya dipindah ke akun yang dipertahankan bila akun itu belum punya. Mahasiswa harus login memakai akun yang dipertahankan.`
+        )
+      ) {
+        return;
+      }
+      res = await send(true);
+      data = await res.json().catch(() => ({}));
+    }
     if (res.ok) showToast("Peserta digabung.");
     else showToast(data.message ?? "Gagal menggabungkan.", "err");
     await fetchData();

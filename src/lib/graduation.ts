@@ -1329,7 +1329,18 @@ export async function listDuplicateGroups(eventId: string): Promise<DuplicateGro
 }
 
 /** Menggabungkan peserta `removeId` ke `keepId`: pengajuan dipindah, status/foto dipertahankan. */
-export async function mergeAttendees(eventId: string, keepId: string, removeId: string): Promise<void> {
+export class BothLinkedError extends Error {
+  constructor() {
+    super("Keduanya sudah terhubung ke akun mahasiswa berbeda.");
+  }
+}
+
+export async function mergeAttendees(
+  eventId: string,
+  keepId: string,
+  removeId: string,
+  mergeAccounts = false
+): Promise<void> {
   await ensureGraduationSchema();
   if (keepId === removeId) throw new Error("Pilih dua peserta berbeda.");
   const client = await pool.connect();
@@ -1343,12 +1354,45 @@ export async function mergeAttendees(eventId: string, keepId: string, removeId: 
     const drop = found.rows.find((r) => r.id === removeId);
     if (!keep || !drop) throw new Error("Peserta tidak ditemukan di acara ini.");
 
-    const keepLinks = await client.query("select 1 from graduation_submissions where attendee_id=$1", [keepId]);
-    const dropLinks = await client.query("select 1 from graduation_submissions where attendee_id=$1", [removeId]);
-    if (keepLinks.rowCount && dropLinks.rowCount) {
-      throw new Error("Keduanya sudah terhubung ke akun mahasiswa berbeda. Hapus salah satu akun mahasiswanya dulu.");
+    const keepSubs = await client.query<{ id: string }>("select id from graduation_submissions where attendee_id=$1", [keepId]);
+    const dropSubs = await client.query<{ id: string; mahasiswa_id: string; yudisium_status: string }>(
+      "select id, mahasiswa_id, yudisium_status from graduation_submissions where attendee_id=$1",
+      [removeId]
+    );
+    if (keepSubs.rowCount && dropSubs.rowCount) {
+      if (!mergeAccounts) throw new BothLinkedError();
+      // Gabungkan akun: bukti bayar/serah-terima/yudisium dari akun yang dibuang dipindah bila akun utama belum punya.
+      const keepSub = keepSubs.rows[0].id;
+      for (const drop of dropSubs.rows) {
+        await client.query(
+          `update graduation_payments set submission_id=$1
+            where submission_id=$2
+              and kind not in (select kind from graduation_payments where submission_id=$1)`,
+          [keepSub, drop.id]
+        );
+        await client.query(
+          `update graduation_pickups set submission_id=$1
+            where submission_id=$2 and not exists (select 1 from graduation_pickups where submission_id=$1)`,
+          [keepSub, drop.id]
+        );
+        await client.query(
+          `update graduation_submissions k set
+              yudisium_status=d.yudisium_status, yudisium_confirmed=d.yudisium_confirmed,
+              yudisium_confirmed_at=d.yudisium_confirmed_at, yudisium_absent_reason=d.yudisium_absent_reason,
+              updated_at=now()
+             from graduation_submissions d
+            where k.id=$1 and d.id=$2 and k.yudisium_status='pending' and d.yudisium_status<>'pending'`,
+          [keepSub, drop.id]
+        );
+        await client.query("delete from graduation_pickups where submission_id=$1", [drop.id]);
+        await client.query("delete from graduation_payments where submission_id=$1", [drop.id]);
+        await client.query("delete from graduation_submissions where id=$1", [drop.id]);
+        await client.query("delete from graduation_notifications where recipient_type='mahasiswa' and recipient_id=$1", [drop.mahasiswa_id]);
+        await client.query("delete from mahasiswa where id=$1", [drop.mahasiswa_id]);
+      }
+    } else {
+      await client.query("update graduation_submissions set attendee_id=$1 where attendee_id=$2", [keepId, removeId]);
     }
-    await client.query("update graduation_submissions set attendee_id=$1 where attendee_id=$2", [keepId, removeId]);
 
     // Pertahankan kemajuan yang sudah terjadi pada peserta yang dibuang.
     const rank = (st: string) => ["draft", "sent", "absent", "confirmed"].indexOf(st);
