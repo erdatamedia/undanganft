@@ -270,6 +270,9 @@ function PesertaTab({
 }) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | InviteStatus>("all");
+  const dual = Boolean(currentEvent?.dualAgenda);
+  const [agenda, setAgenda] = useState<"yudisium" | "pelepasan">("yudisium");
+  const pelepasanMode = dual && agenda === "pelepasan";
   const [pageSize, setPageSize] = useState(10);
   const [pageIndex, setPageIndex] = useState(1);
 
@@ -296,10 +299,17 @@ function PesertaTab({
         // Semua kata kunci harus cocok (nama/prodi/email/NPM). ID tidak dicari: berisi UUID acara sehingga selalu "cocok".
         const haystack = [a.name, a.program, a.email, a.npm].map((v) => (v ?? "").toLowerCase()).join(" ");
         const matchSearch = terms.every((t) => haystack.includes(t));
-        const matchStatus = statusFilter === "all" ? true : a.status === statusFilter;
+        const matchStatus =
+          statusFilter === "all"
+            ? true
+            : pelepasanMode
+              ? statusFilter === "confirmed"
+                ? Boolean(a.pelepasanConfirmedAt)
+                : !a.pelepasanConfirmedAt
+              : a.status === statusFilter;
         return matchSearch && matchStatus;
       });
-  }, [attendees, search, statusFilter]);
+  }, [attendees, search, statusFilter, pelepasanMode]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const paged = filtered.slice((pageIndex - 1) * pageSize, pageIndex * pageSize);
@@ -462,6 +472,29 @@ function PesertaTab({
     <div className="grid lg:grid-cols-[1fr_320px] gap-6">
       {/* Left: attendee table */}
       <div className="space-y-4">
+        {dual && (
+          <div className="grid grid-cols-2 gap-2 rounded-2xl bg-slate-100 p-1">
+            {([
+              ["yudisium", "Yudisium", attendees.filter((a) => a.status === "confirmed").length],
+              ["pelepasan", "Pelepasan", attendees.filter((a) => a.pelepasanConfirmedAt).length],
+            ] as const).map(([key, label, count]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => { setAgenda(key); setStatusFilter("all"); setPageIndex(1); }}
+                className={`rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors ${
+                  agenda === key ? "bg-white text-[#1B4332] shadow-sm" : "text-slate-500 hover:text-slate-700"
+                }`}
+              >
+                {label}
+                <span className="ml-2 text-xs font-normal text-slate-400">
+                  {count}/{attendees.length} hadir
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* Controls */}
         <div className="flex flex-wrap gap-3 items-center justify-between">
           <input
@@ -478,10 +511,19 @@ function PesertaTab({
               className="rounded-xl border border-slate-200 px-3 py-2 text-xs text-[#1A1A2E] focus:border-[#1B4332] focus:outline-none"
             >
               <option value="all">Semua status</option>
-              <option value="draft">Belum dikirim</option>
-              <option value="sent">Terkirim</option>
-              <option value="confirmed">Hadir</option>
-              <option value="absent">Tidak hadir</option>
+              {pelepasanMode ? (
+                <>
+                  <option value="confirmed">Hadir pelepasan</option>
+                  <option value="draft">Belum hadir</option>
+                </>
+              ) : (
+                <>
+                  <option value="draft">Belum dikirim</option>
+                  <option value="sent">Terkirim</option>
+                  <option value="confirmed">Hadir</option>
+                  <option value="absent">Tidak hadir</option>
+                </>
+              )}
             </select>
             <select
               value={pageSize}
@@ -523,18 +565,27 @@ function PesertaTab({
                     <p className="text-xs text-slate-400">{a.email}</p>
                   </td>
                   <td className="px-4 py-3">
-                    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${statusTheme[a.status].badge}`}>
-                      <span className={`h-1.5 w-1.5 rounded-full ${statusTheme[a.status].dot}`} />
-                      {currentEvent?.dualAgenda ? `Yudisium: ${statusTheme[a.status].label}` : statusTheme[a.status].label}
-                    </span>
-                    {currentEvent?.dualAgenda && (
+                    {pelepasanMode ? (
                       <span
-                        className={`mt-1 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${
+                        className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${
                           a.pelepasanConfirmedAt ? "bg-sky-100 text-sky-700" : "bg-slate-100 text-slate-500"
                         }`}
                       >
-                        Pelepasan: {a.pelepasanConfirmedAt ? "Hadir" : "Belum"}
+                        <span className={`h-1.5 w-1.5 rounded-full ${a.pelepasanConfirmedAt ? "bg-sky-500" : "bg-slate-400"}`} />
+                        {a.pelepasanConfirmedAt ? "Hadir pelepasan" : "Belum hadir"}
                       </span>
+                    ) : (
+                      <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${statusTheme[a.status].badge}`}>
+                        <span className={`h-1.5 w-1.5 rounded-full ${statusTheme[a.status].dot}`} />
+                        {statusTheme[a.status].label}
+                      </span>
+                    )}
+                    {dual && (
+                      <p className="mt-1 text-[11px] text-slate-400">
+                        {pelepasanMode
+                          ? `Yudisium: ${a.status === "confirmed" ? "hadir" : a.status === "absent" ? "tidak hadir" : "belum"}`
+                          : `Pelepasan: ${a.pelepasanConfirmedAt ? "hadir" : "belum"}`}
+                      </p>
                     )}
                   </td>
                   <td className="px-4 py-3 text-sm text-slate-500 hidden md:table-cell">{a.npm}</td>
@@ -549,28 +600,21 @@ function PesertaTab({
                         icon={<Send size={13} />}
                       />
                       <ActionBtn
-                        onClick={() => handleToggleConfirm(a)}
+                        onClick={() => (pelepasanMode ? handleTogglePelepasan(a) : handleToggleConfirm(a))}
                         loading={actionId === a.id}
-                        title={a.status === "confirmed" ? "Batalkan" : "Konfirmasi"}
-                        variant={a.status === "confirmed" ? "active" : "primary"}
+                        title={(pelepasanMode ? a.pelepasanConfirmedAt : a.status === "confirmed") ? "Batalkan" : "Konfirmasi"}
+                        variant={(pelepasanMode ? a.pelepasanConfirmedAt : a.status === "confirmed") ? "active" : "primary"}
                         icon={<CheckCircle2 size={13} />}
                       />
-                      {currentEvent?.dualAgenda && (
+                      {!pelepasanMode && (
                         <ActionBtn
-                          onClick={() => handleTogglePelepasan(a)}
+                          onClick={() => handleMarkAbsent(a)}
                           loading={actionId === a.id}
-                          title={a.pelepasanConfirmedAt ? "Batalkan hadir pelepasan" : "Hadir pelepasan"}
-                          variant={a.pelepasanConfirmedAt ? "active" : "outline"}
-                          icon={<GraduationCap size={13} />}
+                          title={a.status === "absent" ? "Batalkan" : "Absen"}
+                          variant="warning"
+                          icon={<UserX size={13} />}
                         />
                       )}
-                      <ActionBtn
-                        onClick={() => handleMarkAbsent(a)}
-                        loading={actionId === a.id}
-                        title={a.status === "absent" ? "Batalkan" : "Absen"}
-                        variant="warning"
-                        icon={<UserX size={13} />}
-                      />
                       <ActionBtn
                         onClick={() => handleDelete(a)}
                         loading={deleteId === a.id}
@@ -1188,28 +1232,31 @@ function LaporanTab({
   const [pdfBusy, setPdfBusy] = useState(false);
   const [xlsBusy, setXlsBusy] = useState(false);
 
+  const [agenda, setAgenda] = useState<"yudisium" | "pelepasan">("yudisium");
+  const pelepasanMode = dualAgenda && agenda === "pelepasan";
+  const isHadir = (a: AttendeeRecord) => (pelepasanMode ? Boolean(a.pelepasanConfirmedAt) : a.status === "confirmed");
+  const hadirAt = (a: AttendeeRecord) => (pelepasanMode ? a.pelepasanConfirmedAt : a.confirmedAt);
+
   const total = attendees.length;
-  const confirmed = attendees.filter((a) => a.status === "confirmed").length;
+  const confirmed = attendees.filter(isHadir).length;
   const absent = attendees.filter((a) => a.status === "absent").length;
   const sent = attendees.filter((a) => a.status !== "draft").length;
   const rate = total ? Math.round((confirmed / total) * 100) : 0;
-  const pelepasan = attendees.filter((a) => a.pelepasanConfirmedAt).length;
-  const ratePelepasan = total ? Math.round((pelepasan / total) * 100) : 0;
 
   const programs = new Map<string, { total: number; confirmed: number }>();
   for (const a of attendees) {
     const key = a.program || "Lainnya";
     const cur = programs.get(key) ?? { total: 0, confirmed: 0 };
     cur.total++;
-    if (a.status === "confirmed") cur.confirmed++;
+    if (isHadir(a)) cur.confirmed++;
     programs.set(key, cur);
   }
   const programList = Array.from(programs.entries())
     .sort((a, b) => b[1].confirmed - a[1].confirmed);
 
   const timeline = [...attendees]
-    .filter((a) => a.status === "confirmed" && a.confirmedAt)
-    .sort((a, b) => new Date(a.confirmedAt!).getTime() - new Date(b.confirmedAt!).getTime())
+    .filter((a) => isHadir(a) && hadirAt(a))
+    .sort((a, b) => new Date(hadirAt(a)!).getTime() - new Date(hadirAt(b)!).getTime())
     .slice(0, 20);
 
   const handleExport = async (format: "pdf" | "excel") => {
@@ -1244,19 +1291,42 @@ function LaporanTab({
 
   return (
     <div className="space-y-5">
+      {dualAgenda && (
+        <div className="grid grid-cols-2 gap-2 rounded-2xl bg-slate-100 p-1">
+          {([
+            ["yudisium", "Yudisium", attendees.filter((a) => a.status === "confirmed").length],
+            ["pelepasan", "Pelepasan", attendees.filter((a) => a.pelepasanConfirmedAt).length],
+          ] as const).map(([key, label, count]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setAgenda(key)}
+              className={`rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors ${
+                agenda === key ? "bg-white text-[#1B4332] shadow-sm" : "text-slate-500 hover:text-slate-700"
+              }`}
+            >
+              {label}
+              <span className="ml-2 text-xs font-normal text-slate-400">{count}/{total} hadir</span>
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         <MiniStat label="Total Peserta" value={total} icon={<Users size={16} className="text-slate-400" />} />
-        <MiniStat label="Terkirim" value={sent} icon={<Send size={16} className="text-amber-500" />} />
-        <MiniStat label={dualAgenda ? "Hadir Yudisium" : "Konfirmasi Hadir"} value={confirmed} icon={<CheckCircle2 size={16} className="text-emerald-600" />} />
-        <MiniStat label="Tidak Hadir" value={absent} icon={<UserX size={16} className="text-rose-500" />} />
-        <MiniStat label="Response Rate" value={`${rate}%`} icon={<FileText size={16} className="text-[#40916C]" />} />
-        {dualAgenda && (
-          <>
-            <MiniStat label="Hadir Pelepasan" value={pelepasan} icon={<CheckCircle2 size={16} className="text-sky-600" />} />
-            <MiniStat label="Rate Pelepasan" value={`${ratePelepasan}%`} icon={<FileText size={16} className="text-sky-600" />} />
-          </>
+        {pelepasanMode ? (
+          <MiniStat label="Belum Hadir" value={total - confirmed} icon={<Send size={16} className="text-amber-500" />} />
+        ) : (
+          <MiniStat label="Terkirim" value={sent} icon={<Send size={16} className="text-amber-500" />} />
         )}
+        <MiniStat label={dualAgenda ? `Hadir ${pelepasanMode ? "Pelepasan" : "Yudisium"}` : "Konfirmasi Hadir"} value={confirmed} icon={<CheckCircle2 size={16} className="text-emerald-600" />} />
+        {pelepasanMode ? (
+          <MiniStat label="Sudah Hadir Yudisium" value={attendees.filter((a) => a.status === "confirmed").length} icon={<UserX size={16} className="text-slate-400" />} />
+        ) : (
+          <MiniStat label="Tidak Hadir" value={absent} icon={<UserX size={16} className="text-rose-500" />} />
+        )}
+        <MiniStat label="Response Rate" value={`${rate}%`} icon={<FileText size={16} className="text-[#40916C]" />} />
       </div>
 
       {/* Export buttons */}
@@ -1338,7 +1408,7 @@ function LaporanTab({
                     <p className="text-xs text-slate-400">{a.program}</p>
                   </div>
                   <span className="shrink-0 text-xs text-slate-500 tabular-nums">
-                    {new Date(a.confirmedAt!).toLocaleTimeString("id-ID", {
+                    {new Date(hadirAt(a)!).toLocaleTimeString("id-ID", {
                       hour: "2-digit",
                       minute: "2-digit",
                     })}

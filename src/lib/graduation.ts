@@ -1263,8 +1263,21 @@ export type DuplicateMember = {
 
 const nameKey = (v: string) => v.toLowerCase().replace(/[^a-z0-9]+/g, "");
 
+function editDistance(a: string, b: string): number {
+  const dp = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)] as number[]);
+  for (let j = 1; j <= b.length; j++) dp[0][j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+  }
+  return dp[a.length][b.length];
+}
+
+export type DuplicateGroup = { kind: "exact" | "similar"; members: DuplicateMember[] };
+
 /** Peserta dengan nama (atau NPM) sama dalam satu acara, dikelompokkan untuk digabung. */
-export async function listDuplicateGroups(eventId: string): Promise<DuplicateMember[][]> {
+export async function listDuplicateGroups(eventId: string): Promise<DuplicateGroup[]> {
   await ensureGraduationSchema();
   const rows = await query<{
     id: string; name: string; npm: string; program: string; status: string; imported: boolean; linked: boolean;
@@ -1295,7 +1308,24 @@ export async function listDuplicateGroups(eventId: string): Promise<DuplicateMem
     byNpm.set(m.npm, [...(byNpm.get(m.npm) ?? []), m]);
   }
   groups.push(...[...byNpm.values()].filter((g) => g.length > 1));
-  return groups;
+  const result: DuplicateGroup[] = groups.map((members) => ({ kind: "exact" as const, members }));
+
+  // Mirip: pendaftar mandiri (bukan hasil impor) yang namanya hampir sama dengan data impor
+  // (salah ketik) — hanya disarankan, tidak digabung otomatis.
+  const used = new Set(groups.flat().map((m) => m.id));
+  const importedOnes = members.filter((m) => m.imported);
+  for (const m of members) {
+    if (m.imported || used.has(m.id)) continue;
+    const key = nameKey(m.name);
+    const hit = importedOnes.find((im) => {
+      const ik = nameKey(im.name);
+      const nearName = key.length > 6 && editDistance(key, ik) <= Math.max(1, Math.floor(ik.length / 12));
+      const nearNpm = m.npm.length >= 8 && m.npm.length === im.npm.length && editDistance(m.npm, im.npm) <= 1 && editDistance(key, ik) <= 6;
+      return nearName || nearNpm;
+    });
+    if (hit) result.push({ kind: "similar", members: [hit, m] });
+  }
+  return result;
 }
 
 /** Menggabungkan peserta `removeId` ke `keepId`: pengajuan dipindah, status/foto dipertahankan. */
@@ -1358,4 +1388,31 @@ export async function findUnlinkedAttendeeByName(eventId: string, name: string):
     [eventId, nameKey(name)]
   );
   return rows.length === 1 ? rows[0].id : null;
+}
+
+/**
+ * Menggabungkan otomatis grup duplikat yang jelas: tepat satu data hasil impor + satu/lebih data lain
+ * (pendaftar mandiri). Data impor dipertahankan; kemajuan hadir & tautan akun dipindahkan.
+ */
+export async function autoMergeDuplicates(eventId: string): Promise<{ merged: number; skipped: number }> {
+  const groups = (await listDuplicateGroups(eventId)).filter((g) => g.kind === "exact").map((g) => g.members);
+  let merged = 0;
+  let skipped = 0;
+  for (const group of groups) {
+    const imported = group.filter((m) => m.imported);
+    const others = group.filter((m) => !m.imported);
+    if (imported.length !== 1 || others.length === 0) {
+      skipped++;
+      continue;
+    }
+    for (const other of others) {
+      try {
+        await mergeAttendees(eventId, imported[0].id, other.id);
+        merged++;
+      } catch {
+        skipped++;
+      }
+    }
+  }
+  return { merged, skipped };
 }

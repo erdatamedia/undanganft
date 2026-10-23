@@ -36,7 +36,7 @@ export default function YudisiumAdminPage() {
   const [registrants, setRegistrants] = useState<Registrant[]>([]);
   const [regInfo, setRegInfo] = useState<{ isRegistrationEvent: boolean; registrationEvent: { id: string; name: string } | null; unlinked: number } | null>(null);
   const [syncBusy, setSyncBusy] = useState(false);
-  const [dupGroups, setDupGroups] = useState<DupMember[][]>([]);
+  const [dupGroups, setDupGroups] = useState<{ kind: "exact" | "similar"; members: DupMember[] }[]>([]);
   const [vrows, setVrows] = useState<VRow[]>([]);
   const [docs, setDocs] = useState<Doc[]>([]);
   const [docBusy, setDocBusy] = useState<string | null>(null);
@@ -113,6 +113,20 @@ export default function YudisiumAdminPage() {
     const res = await fetch(`/api/events/${eventId}/pendaftar/${r.mahasiswaId}`, { method: "DELETE", credentials: "include" });
     if (res.ok) showToast(`Akun ${r.name} dihapus.`);
     else showToast("Gagal menghapus akun.", "err");
+    await fetchData();
+  };
+
+  const handleAutoMerge = async () => {
+    if (!confirm("Gabungkan otomatis semua duplikat yang jelas (1 data hasil impor + data pendaftar mandiri)? Data hasil impor dipertahankan.")) return;
+    const res = await fetch(`/api/events/${eventId}/duplikat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ auto: true }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) showToast(`${data.merged} digabung, ${data.skipped} dilewati (perlu dicek manual).`);
+    else showToast(data.message ?? "Gagal menggabungkan.", "err");
     await fetchData();
   };
 
@@ -388,14 +402,25 @@ export default function YudisiumAdminPage() {
           {/* Duplikasi peserta */}
           {dupGroups.length > 0 && (
             <div className="rounded-2xl bg-white border border-amber-200 p-5">
-              <h3 className="text-sm font-bold text-[#1A1A2E] mb-1">Kemungkinan Duplikat Peserta ({dupGroups.length})</h3>
+              <div className="flex items-start justify-between gap-3 mb-1">
+                <h3 className="text-sm font-bold text-[#1A1A2E]">Kemungkinan Duplikat Peserta ({dupGroups.length})</h3>
+                <button
+                  onClick={handleAutoMerge}
+                  className="shrink-0 rounded-lg bg-[#1B4332] text-white text-xs font-semibold px-3 py-1.5 hover:bg-[#40916C]"
+                >
+                  Gabungkan Otomatis
+                </button>
+              </div>
               <p className="text-xs text-slate-500 mb-4">
                 Nama atau NPM sama. Pilih data yang dipertahankan (disarankan: hasil impor); data lainnya digabung
                 ke dalamnya, termasuk tautan akun mahasiswa dan status kehadiran.
               </p>
               <div className="space-y-3">
-                {dupGroups.map((group) => (
+                {dupGroups.map(({ kind, members: group }) => (
                   <div key={group.map((m) => m.id).join("|")} className="rounded-xl border border-slate-100 divide-y divide-slate-100">
+                    <p className={`px-3 py-1.5 text-[11px] font-semibold ${kind === "exact" ? "text-rose-600" : "text-amber-600"}`}>
+                      {kind === "exact" ? "Nama / NPM sama" : "Nama atau NPM mirip (kemungkinan salah ketik)"}
+                    </p>
                     {group.map((m) => (
                       <div key={m.id} className="px-3 py-2 flex items-center justify-between gap-3 text-sm">
                         <div className="min-w-0">
