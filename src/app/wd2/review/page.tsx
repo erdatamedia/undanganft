@@ -5,11 +5,13 @@ import { useRouter } from "next/navigation";
 import {
   Bell,
   CheckCircle2,
+  Archive,
   CheckSquare,
   ClipboardCheck,
   Inbox,
   Loader2,
   LogOut,
+  Search,
   Square,
   XCircle,
 } from "lucide-react";
@@ -46,6 +48,26 @@ type PickupItem = {
   payments: { fakultas: Payment; univ: Payment };
 };
 
+type MonitorPay = { id: string; status: string; rejectReason: string | null; image: string } | null;
+type MonitorItem = {
+  submissionId: string;
+  npm: string;
+  name: string;
+  program: string | null;
+  yudisiumStatus: string | null;
+  fakultas: MonitorPay;
+  univ: MonitorPay;
+  pickup: {
+    handedAt: string;
+    undanganGiven: boolean;
+    togaGiven: boolean;
+    note: string | null;
+    checkStatus: "pending" | "valid" | "issue";
+    checkNote: string | null;
+    image: string | null;
+  } | null;
+};
+
 type Notification = { id: string; title: string; body: string | null; readAt: string | null };
 
 type Preview =
@@ -60,11 +82,17 @@ const kindLabel: Record<Kind, string> = {
 
 export default function Wd2ReviewPage() {
   const router = useRouter();
-  const [tab, setTab] = useState<"queue" | "pickups">("queue");
+  const [tab, setTab] = useState<"queue" | "pickups" | "monitor">("queue");
   const [reviewerType, setReviewerType] = useState<"wd2" | "admin">("wd2");
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [pickups, setPickups] = useState<PickupItem[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const [monitor, setMonitor] = useState<MonitorItem[]>([]);
+  const [monitorTotal, setMonitorTotal] = useState(0);
+  const [monitorQuery, setMonitorQuery] = useState("");
+  const [monitorFilter, setMonitorFilter] = useState<"all" | "picked" | "unpicked" | "issue" | "rejected">("all");
+  const [monitorBusy, setMonitorBusy] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -113,6 +141,27 @@ export default function Wd2ReviewPage() {
     setLoading(true);
     Promise.all([fetchQueue(), fetchPickups(), fetchNotifications()]).finally(() => setLoading(false));
   }, [fetchQueue, fetchPickups, fetchNotifications]);
+
+  const loadMonitor = useCallback(
+    async (append: boolean, offset = 0) => {
+      setMonitorBusy(true);
+      const params = new URLSearchParams({ filter: monitorFilter, q: monitorQuery, limit: "30", offset: String(offset) });
+      const res = await fetch(`/api/wd2/monitor?${params}`, { credentials: "include" });
+      if (res.ok) {
+        const data = await res.json();
+        setMonitor((prev) => (append ? [...prev, ...data.rows] : data.rows));
+        setMonitorTotal(data.total);
+      }
+      setMonitorBusy(false);
+    },
+    [monitorFilter, monitorQuery]
+  );
+
+  useEffect(() => {
+    if (tab !== "monitor") return;
+    const t = setTimeout(() => void loadMonitor(false), 300);
+    return () => clearTimeout(t);
+  }, [tab, loadMonitor]);
 
   const handleLogout = async () => {
     if (reviewerType === "admin") {
@@ -253,12 +302,136 @@ export default function Wd2ReviewPage() {
   const allSelected = queue.length > 0 && selected.size === queue.length;
   const previewPayment = preview?.type === "payment" ? preview : null;
 
+  const payTone = (st: string): "ok" | "wait" | "bad" | "info" | "muted" =>
+    st === "approved" ? "ok" : st === "pending" ? "wait" : st === "rejected" ? "bad" : st === "desk" ? "info" : "muted";
+  const payLabel = (st: string) =>
+    ({ approved: "Disetujui", pending: "Menunggu", rejected: "Ditolak", desk: "Diverifikasi di meja" } as Record<string, string>)[st] ?? st;
+
+  const monitorView = (
+    <>
+      <div className="glass-card !rounded-2xl px-4 py-3 space-y-3">
+        <div className="relative">
+          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            value={monitorQuery}
+            onChange={(e) => setMonitorQuery(e.target.value)}
+            placeholder="Cari nama atau NPM…"
+            className="glass-input !pl-9"
+          />
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {([
+            ["all", "Semua"],
+            ["picked", "Sudah ambil"],
+            ["unpicked", "Belum ambil"],
+            ["issue", "Bermasalah"],
+            ["rejected", "Bukti ditolak"],
+          ] as const).map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => setMonitorFilter(key)}
+              className={`px-3 py-1.5 rounded-full text-xs font-semibold border ${
+                monitorFilter === key
+                  ? "bg-[#1B4332] text-white border-[#1B4332]"
+                  : "bg-white/60 text-slate-600 border-white/70"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <p className="text-xs text-slate-500">
+          {monitorBusy && monitor.length === 0 ? "Memuat…" : `${monitorTotal} mahasiswa`} · hanya lihat
+        </p>
+      </div>
+
+      {monitor.map((m) => (
+        <GlassCard key={m.submissionId}>
+          <div className="mb-3">
+            <p className="font-bold text-[#11291f]">{m.name}</p>
+            <p className="text-xs text-slate-500">
+              {m.npm}
+              {m.program ? ` • ${m.program}` : ""}
+              {m.yudisiumStatus && m.yudisiumStatus !== "pending"
+                ? ` • Yudisium: ${m.yudisiumStatus === "hadir" ? "hadir" : "tidak hadir"}`
+                : ""}
+            </p>
+          </div>
+          <div className="flex gap-3 overflow-x-auto pb-1">
+            {([
+              ["Fakultas", m.fakultas],
+              ["Univ", m.univ],
+            ] as const).map(([label, p]) => (
+              <div key={label} className="text-center shrink-0">
+                {proofThumb(p?.image ?? null, `Bukti ${label.toLowerCase()} — ${m.name}`)}
+                <p className="text-[10px] text-slate-500 mt-1">{label}</p>
+                {p && (
+                  <div className="mt-1">
+                    <StatusPill tone={payTone(p.status)}>{payLabel(p.status)}</StatusPill>
+                  </div>
+                )}
+              </div>
+            ))}
+            <div className="text-center shrink-0">
+              {proofThumb(m.pickup?.image ?? null, `Serah-terima — ${m.name}`)}
+              <p className="text-[10px] text-slate-500 mt-1">Serah-terima</p>
+              {m.pickup ? (
+                <div className="mt-1">
+                  <StatusPill tone={m.pickup.checkStatus === "valid" ? "ok" : m.pickup.checkStatus === "issue" ? "bad" : "wait"}>
+                    {m.pickup.checkStatus === "valid" ? "Valid" : m.pickup.checkStatus === "issue" ? "Bermasalah" : "Menunggu"}
+                  </StatusPill>
+                </div>
+              ) : (
+                <div className="mt-1">
+                  <StatusPill tone="muted">Belum ambil</StatusPill>
+                </div>
+              )}
+            </div>
+          </div>
+          {m.pickup && (
+            <p className="text-xs text-slate-500 mt-2">
+              Diserahkan {new Date(m.pickup.handedAt).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" })}
+              {m.pickup.undanganGiven ? " • Undangan" : ""}
+              {m.pickup.togaGiven ? " • Toga" : ""}
+            </p>
+          )}
+          {m.pickup?.note && <p className="glass-inset p-3 text-xs text-slate-600 mt-2">Catatan admin: {m.pickup.note}</p>}
+          {m.pickup?.checkNote && <p className="glass-inset p-3 text-xs text-rose-700 mt-2">Catatan verifikasi: {m.pickup.checkNote}</p>}
+          {(m.fakultas?.rejectReason || m.univ?.rejectReason) && (
+            <p className="glass-inset p-3 text-xs text-rose-700 mt-2">
+              Ditolak: {[m.fakultas?.rejectReason, m.univ?.rejectReason].filter(Boolean).join(" / ")}
+            </p>
+          )}
+        </GlassCard>
+      ))}
+
+      {!monitorBusy && monitor.length === 0 && (
+        <GlassCard>
+          <div className="text-center py-6 text-slate-500 text-sm">
+            <Archive className="mx-auto mb-2 text-slate-400" /> Tidak ada data yang cocok.
+          </div>
+        </GlassCard>
+      )}
+
+      {monitor.length < monitorTotal && (
+        <button
+          onClick={() => void loadMonitor(true, monitor.length)}
+          disabled={monitorBusy}
+          className="glass-btn w-full flex items-center justify-center gap-2"
+        >
+          {monitorBusy && <Loader2 size={14} className="animate-spin" />}
+          Muat lagi ({monitorTotal - monitor.length} tersisa)
+        </button>
+      )}
+    </>
+  );
+
   return (
     <div className="glass-bg">
       <div className="max-w-2xl mx-auto px-5 pt-6 space-y-4">
         <div>
           <p className="text-sm text-slate-500">{reviewerType === "admin" ? "Admin (akses penuh)" : "Reviewer"}</p>
-          <h1 className="glass-title">{tab === "queue" ? "Review Bukti Bayar" : "Verifikasi Susulan"}</h1>
+          <h1 className="glass-title">{tab === "queue" ? "Review Bukti Bayar" : tab === "pickups" ? "Verifikasi Susulan" : "Arsip & Monitoring"}</h1>
         </div>
 
         {toast && (
@@ -271,6 +444,8 @@ export default function Wd2ReviewPage() {
           <div className="flex justify-center py-16">
             <Loader2 className="animate-spin text-[#40916C]" size={26} />
           </div>
+        ) : tab === "monitor" ? (
+          monitorView
         ) : tab === "queue" ? (
           <>
             <div className="glass-card !rounded-2xl px-4 py-3 flex items-center justify-between gap-3">
@@ -428,6 +603,10 @@ export default function Wd2ReviewPage() {
         <button className={tab === "pickups" ? "is-active" : ""} onClick={() => setTab("pickups")}>
           <ClipboardCheck size={20} />
           Susulan{pickups.length ? ` (${pickups.length})` : ""}
+        </button>
+        <button className={tab === "monitor" ? "is-active" : ""} onClick={() => setTab("monitor")}>
+          <Archive size={20} />
+          Arsip
         </button>
         {reviewerType === "wd2" && (
           <button onClick={openNotifications}>

@@ -1460,3 +1460,101 @@ export async function autoMergeDuplicates(eventId: string): Promise<{ merged: nu
   }
   return { merged, skipped };
 }
+
+// ─── Monitoring WD2 (arsip bukti bayar + serah-terima) ─────────────────────
+
+export type MonitorFilter = "all" | "picked" | "unpicked" | "issue" | "rejected";
+
+export type MonitorRow = {
+  submissionId: string;
+  npm: string;
+  name: string;
+  program: string | null;
+  yudisiumStatus: string | null;
+  fakultas: { id: string; status: string; rejectReason: string | null; uploadedAt: string | null } | null;
+  univ: { id: string; status: string; rejectReason: string | null; uploadedAt: string | null } | null;
+  pickup: {
+    id: string;
+    handedAt: string;
+    undanganGiven: boolean;
+    togaGiven: boolean;
+    note: string | null;
+    checkStatus: "pending" | "valid" | "issue";
+    checkNote: string | null;
+    hasPhoto: boolean;
+  } | null;
+};
+
+export async function listMonitor(opts: {
+  q?: string;
+  filter?: MonitorFilter;
+  limit?: number;
+  offset?: number;
+}): Promise<{ rows: MonitorRow[]; total: number }> {
+  await ensureGraduationSchema();
+  const where: string[] = [
+    "(exists (select 1 from graduation_payments p where p.submission_id=gs.id and p.proof is not null) or gp.id is not null)",
+  ];
+  const params: unknown[] = [];
+  const term = (opts.q ?? "").trim();
+  if (term) {
+    params.push(`%${term}%`);
+    where.push(`(m.name ilike $${params.length} or m.npm ilike $${params.length})`);
+  }
+  switch (opts.filter) {
+    case "picked": where.push("gp.id is not null"); break;
+    case "unpicked": where.push("gp.id is null"); break;
+    case "issue": where.push("gp.wd2_check_status='issue'"); break;
+    case "rejected":
+      where.push("exists (select 1 from graduation_payments p where p.submission_id=gs.id and p.status='rejected')");
+      break;
+  }
+  const base = `from graduation_submissions gs
+     join mahasiswa m on m.id=gs.mahasiswa_id
+     left join mahasiswa_eligible el on el.event_id=gs.event_id and el.npm=m.npm
+     left join graduation_pickups gp on gp.submission_id=gs.id
+     where ${where.join(" and ")}`;
+
+  const count = await query<{ n: string }>(`select count(*)::text as n ${base}`, params);
+  const limit = Math.min(opts.limit ?? 30, 100);
+  const rows = await query<Record<string, unknown>>(
+    `select gs.id as sid, m.npm, m.name, el.program, gs.yudisium_status,
+            (select row_to_json(x) from (select id, status, reject_reason, uploaded_at from graduation_payments p where p.submission_id=gs.id and p.kind='fakultas' and p.proof is not null) x) as fak,
+            (select row_to_json(x) from (select id, status, reject_reason, uploaded_at from graduation_payments p where p.submission_id=gs.id and p.kind='univ' and p.proof is not null) x) as univ,
+            gp.id as pid, gp.handed_at, gp.undangan_given, gp.toga_given, gp.note, gp.wd2_check_status, gp.wd2_check_note,
+            (gp.handover_photo is not null) as has_photo
+     ${base}
+     order by coalesce(gp.handed_at, gs.updated_at) desc
+     limit ${limit} offset ${Math.max(opts.offset ?? 0, 0)}`,
+    params
+  );
+
+  const pay = (v: unknown) => {
+    const o = v as { id: string; status: string; reject_reason: string | null; uploaded_at: string | null } | null;
+    return o ? { id: o.id, status: o.status, rejectReason: o.reject_reason, uploadedAt: o.uploaded_at } : null;
+  };
+  return {
+    total: Number(count[0]?.n ?? 0),
+    rows: rows.map((r) => ({
+      submissionId: r.sid as string,
+      npm: r.npm as string,
+      name: r.name as string,
+      program: (r.program as string | null) ?? null,
+      yudisiumStatus: (r.yudisium_status as string | null) ?? null,
+      fakultas: pay(r.fak),
+      univ: pay(r.univ),
+      pickup: r.pid
+        ? {
+            id: r.pid as string,
+            handedAt: r.handed_at as string,
+            undanganGiven: Boolean(r.undangan_given),
+            togaGiven: Boolean(r.toga_given),
+            note: (r.note as string | null) ?? null,
+            checkStatus: r.wd2_check_status as "pending" | "valid" | "issue",
+            checkNote: (r.wd2_check_note as string | null) ?? null,
+            hasPhoto: Boolean(r.has_photo),
+          }
+        : null,
+    })),
+  };
+}
