@@ -35,6 +35,7 @@ import {
 } from "lucide-react";
 import type { AttendeeRecord, InviteStatus } from "@/lib/storage";
 import type { EventRecord as EventData } from "@/lib/event";
+import { KonsumsiCard } from "@/components/konsumsi-card";
 import type { RundownAttachmentRecord, RundownItemRecord } from "@/lib/rundown";
 
 type Tab = "peserta" | "undangan" | "scan" | "laporan" | "rundown";
@@ -1451,6 +1452,8 @@ function LaporanTab({
           </button>
         </div>
       </div>
+
+      <KonsumsiCard eventId={eventId} />
 
       <div className="grid md:grid-cols-2 gap-5">
         {/* Per-program breakdown */}

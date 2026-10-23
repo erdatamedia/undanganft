@@ -1641,3 +1641,67 @@ export async function getPickupMapByAttendee(eventId: string): Promise<Map<strin
     ])
   );
 }
+
+// ─── Laporan konsumsi: mahasiswa dengan dua pembayaran terverifikasi ────────
+
+export type KonsumsiRow = {
+  npm: string;
+  name: string;
+  program: string | null;
+  fakultasAt: string | null;
+  fakultasStatus: string;
+  fakultasBy: string | null;
+  univAt: string | null;
+  univStatus: string;
+  univBy: string | null;
+  completeAt: string | null;
+  yudisiumStatus: string | null;
+  pickedUp: boolean;
+  togaGiven: boolean;
+  undanganGiven: boolean;
+  note: string | null;
+};
+
+/** Mahasiswa yang kedua bukti bayarnya (fakultas & univ) disetujui; opsional sertakan "desk" (verifikasi meja). */
+export async function listKonsumsi(eventId: string, includeDesk: boolean): Promise<KonsumsiRow[]> {
+  await ensureGraduationSchema();
+  const statuses = includeDesk ? ["approved", "desk"] : ["approved"];
+  const rows = await query<Record<string, unknown>>(
+    `select m.npm, m.name, coalesce(el.program, a.program) as program, gs.yudisium_status,
+            pf.status as fs, pf.reviewed_at as fat, pf.reviewed_by_type as fby,
+            pu.status as us, pu.reviewed_at as uat, pu.reviewed_by_type as uby,
+            gp.id as pid, gp.toga_given, gp.undangan_given, gp.note
+       from graduation_submissions gs
+       join mahasiswa m on m.id = gs.mahasiswa_id
+       join graduation_payments pf on pf.submission_id = gs.id and pf.kind = 'fakultas' and pf.status = any($2::text[])
+       join graduation_payments pu on pu.submission_id = gs.id and pu.kind = 'univ' and pu.status = any($2::text[])
+       left join mahasiswa_eligible el on el.event_id = gs.event_id and el.npm = m.npm
+       left join attendees a on a.id = gs.attendee_id
+       left join graduation_pickups gp on gp.submission_id = gs.id
+      where gs.event_id = $1
+      order by coalesce(el.program, a.program, '~'), m.name`,
+    [eventId, statuses]
+  );
+  return rows.map((r) => {
+    const fat = (r.fat as string | null) ?? null;
+    const uat = (r.uat as string | null) ?? null;
+    const complete = fat && uat ? (new Date(fat) > new Date(uat) ? fat : uat) : fat ?? uat;
+    return {
+      npm: r.npm as string,
+      name: r.name as string,
+      program: (r.program as string | null) ?? null,
+      fakultasAt: fat,
+      fakultasStatus: r.fs as string,
+      fakultasBy: (r.fby as string | null) ?? null,
+      univAt: uat,
+      univStatus: r.us as string,
+      univBy: (r.uby as string | null) ?? null,
+      completeAt: complete,
+      yudisiumStatus: (r.yudisium_status as string | null) ?? null,
+      pickedUp: Boolean(r.pid),
+      togaGiven: Boolean(r.toga_given),
+      undanganGiven: Boolean(r.undangan_given),
+      note: (r.note as string | null) ?? null,
+    };
+  });
+}
