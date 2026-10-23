@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getUserFromSession } from "@/lib/auth";
 import { resolveEvent } from "@/lib/event";
 import { syncRegistrantsToEvent } from "@/lib/graduation-flow";
+import { getPickupMapByAttendee } from "@/lib/graduation";
 import {
   addAttendee,
   readAttendees,
@@ -17,7 +18,11 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const selectedEvent = await resolveEvent(url.searchParams.get("eventId"));
   await syncRegistrantsToEvent(selectedEvent.id).catch(() => {});
-  const attendees = await readAttendees(selectedEvent.id);
+  const [rows, pickups] = await Promise.all([
+    readAttendees(selectedEvent.id),
+    getPickupMapByAttendee(selectedEvent.id).catch(() => new Map()),
+  ]);
+  const attendees = rows.map((a) => ({ ...a, pickup: pickups.get(a.id) ?? null }));
   return NextResponse.json({ event: selectedEvent, attendees });
 }
 

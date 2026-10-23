@@ -1619,3 +1619,25 @@ export async function repairAttendeesFromImport(
   }
   return { fixed, unmatched };
 }
+
+// ─── Pengambilan (toga & undangan) per peserta ─────────────────────────────
+
+export type AttendeePickup = { handedAt: string; undanganGiven: boolean; togaGiven: boolean };
+
+/** Peserta (attendee id) -> data serah-terima di meja pengambilan, untuk laporan. */
+export async function getPickupMapByAttendee(eventId: string): Promise<Map<string, AttendeePickup>> {
+  await ensureGraduationSchema();
+  const rows = await query<{ attendee_id: string; handed_at: string; undangan_given: boolean; toga_given: boolean }>(
+    `select gs.attendee_id, gp.handed_at, gp.undangan_given, gp.toga_given
+       from graduation_pickups gp
+       join graduation_submissions gs on gs.id = gp.submission_id
+      where gs.event_id=$1 and gs.attendee_id is not null`,
+    [eventId]
+  );
+  return new Map(
+    rows.map((r) => [
+      r.attendee_id,
+      { handedAt: r.handed_at, undanganGiven: r.undangan_given, togaGiven: r.toga_given },
+    ])
+  );
+}

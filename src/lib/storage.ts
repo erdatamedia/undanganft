@@ -36,6 +36,8 @@ export type AttendeeRecord = {
   confirmedAt?: string | null;
   /** Agenda kedua (pelepasan) pada acara dua agenda; status/confirmedAt = agenda pertama (yudisium). */
   pelepasanConfirmedAt?: string | null;
+  /** Serah-terima di meja pengambilan (toga/undangan), diisi oleh API laporan. */
+  pickup?: { handedAt: string; undanganGiven: boolean; togaGiven: boolean } | null;
   createdAt: string;
   updatedAt: string;
 };

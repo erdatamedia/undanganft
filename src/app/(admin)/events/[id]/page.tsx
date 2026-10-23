@@ -667,7 +667,14 @@ function PesertaTab({
                       </p>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-sm text-slate-500 hidden md:table-cell">{a.npm}</td>
+                  <td className="px-4 py-3 text-sm text-slate-500 hidden md:table-cell">
+                    {a.npm}
+                    {a.pickup && (
+                      <span className="mt-1 block text-[11px] font-semibold text-amber-700">
+                        Sudah ambil: {[a.pickup.togaGiven ? "toga" : null, a.pickup.undanganGiven ? "undangan" : null].filter(Boolean).join(" + ")}
+                      </span>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-sm text-slate-500 hidden lg:table-cell">{a.seat}</td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-end gap-1.5">
@@ -1413,6 +1420,8 @@ function LaporanTab({
           <MiniStat label="Tidak Hadir" value={absent} icon={<UserX size={16} className="text-rose-500" />} />
         )}
         <MiniStat label="Response Rate" value={`${rate}%`} icon={<FileText size={16} className="text-[#40916C]" />} />
+        <MiniStat label="Ambil Toga" value={attendees.filter((a) => a.pickup?.togaGiven).length} icon={<GraduationCap size={16} className="text-amber-600" />} />
+        <MiniStat label="Ambil Undangan" value={attendees.filter((a) => a.pickup?.undanganGiven).length} icon={<GraduationCap size={16} className="text-amber-600" />} />
       </div>
 
       {/* Export buttons */}

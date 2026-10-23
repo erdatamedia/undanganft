@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getUserFromSession } from "@/lib/auth";
 import { getEvent } from "@/lib/event";
 import { readAttendees } from "@/lib/storage";
+import { getPickupMapByAttendee } from "@/lib/graduation";
 import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
 import * as XLSX from "xlsx";
 
@@ -38,6 +39,9 @@ function buildExcel(
     [dual ? "Waktu Hadir Yudisium" : "Waktu Konfirmasi Hadir"]: a.confirmedAt
       ? new Date(a.confirmedAt).toLocaleString("id-ID")
       : "-",
+    "Ambil Toga": a.pickup?.togaGiven ? "Sudah" : "Belum",
+    "Ambil Undangan": a.pickup?.undanganGiven ? "Sudah" : "Belum",
+    "Waktu Pengambilan": a.pickup ? new Date(a.pickup.handedAt).toLocaleString("id-ID") : "-",
     ...(dual
       ? {
           "Hadir Pelepasan": a.pelepasanConfirmedAt ? "Hadir" : "Belum",
@@ -61,6 +65,9 @@ function buildExcel(
     { wch: 12 },
     { wch: 14 },
     { wch: 22 },
+    { wch: 22 },
+    { wch: 12 },
+    { wch: 14 },
     { wch: 22 },
     ...(dual ? [{ wch: 16 }, { wch: 22 }] : []),
   ];
@@ -91,6 +98,8 @@ function buildExcel(
       Keterangan: "Response Rate",
       Nilai: total ? `${Math.round((confirmed / total) * 100)}%` : "0%",
     },
+    { Keterangan: "Sudah ambil toga (meja pengambilan)", Nilai: attendees.filter((a) => a.pickup?.togaGiven).length },
+    { Keterangan: "Sudah ambil undangan (meja pengambilan)", Nilai: attendees.filter((a) => a.pickup?.undanganGiven).length },
     { Keterangan: "", Nilai: "" },
     { Keterangan: "Program Studi", Nilai: "Total / Hadir" },
     ...Array.from(programs.entries()).map(([prog, stat]) => ({
@@ -203,20 +212,32 @@ async function buildPdf(
     : [{ title: "KEHADIRAN", color: green, hadir: yudisiumHadir, extra: `Tidak hadir: ${yudisiumAbsen}` }];
 
   const gap = 10;
-  const blockW = (contentW - gap * (summaryBlocks.length)) / (summaryBlocks.length + 1);
+  const boxCount = summaryBlocks.length + 2; // total + agenda + pengambilan
+  const blockW = (contentW - gap * (boxCount - 1)) / boxCount;
   // kotak pertama: total peserta
   const boxH = 54;
+  const bigSize = boxCount >= 4 ? 13 : 17;
   const drawBox = (idx: number, title: string, big: string, sub: string, color: ReturnType<typeof rgb>) => {
     const bx = margin + idx * (blockW + gap);
     page.drawRectangle({ x: bx, y: y - boxH, width: blockW, height: boxH, color: panel, borderColor: lightGray, borderWidth: 0.5 });
     page.drawRectangle({ x: bx, y: y - boxH, width: 3, height: boxH, color });
     text(page, title, bx + 10, y - 14, 7.5, fontBold, color);
-    text(page, big, bx + 10, y - 33, 17, fontBold, dark);
-    text(page, sub, bx + 10, y - 46, 7.5, font, muted);
+    text(page, big, bx + 10, y - 33, bigSize, fontBold, dark);
+    text(page, fit(sub, 7, blockW - 14), bx + 10, y - 46, 7, font, muted);
   };
   drawBox(0, "TOTAL PESERTA", String(total), `${new Set(attendees.map((a) => a.program || "-")).size} program studi`, accent);
   summaryBlocks.forEach((b, i) =>
     drawBox(i + 1, b.title, `${b.hadir} hadir (${pct(b.hadir)}%)`, b.extra, b.color)
+  );
+  const pickedUp = attendees.filter((a) => a.pickup).length;
+  const togaN = attendees.filter((a) => a.pickup?.togaGiven).length;
+  const undanganN = attendees.filter((a) => a.pickup?.undanganGiven).length;
+  drawBox(
+    summaryBlocks.length + 1,
+    "PENGAMBILAN",
+    `${pickedUp} sudah ambil`,
+    `Toga ${togaN} | Undangan ${undanganN}`,
+    rgb(0.7, 0.45, 0.05)
   );
   y -= boxH + 22;
 
@@ -235,16 +256,20 @@ async function buildPdf(
   const recapCols = dual
     ? [
         { label: "Program Studi", x: margin, align: "left" as const },
-        { label: "Peserta", x: margin + 250, align: "right" as const },
-        { label: "Yudisium", x: margin + 330, align: "right" as const },
-        { label: "%", x: margin + 370, align: "right" as const },
-        { label: "Pelepasan", x: margin + 440, align: "right" as const },
+        { label: "Peserta", x: margin + 200, align: "right" as const },
+        { label: "Yudisium", x: margin + 262, align: "right" as const },
+        { label: "%", x: margin + 292, align: "right" as const },
+        { label: "Pelepasan", x: margin + 352, align: "right" as const },
+        { label: "%", x: margin + 382, align: "right" as const },
+        { label: "Ambil", x: margin + 440, align: "right" as const },
         { label: "%", x: right, align: "right" as const },
       ]
     : [
         { label: "Program Studi", x: margin, align: "left" as const },
-        { label: "Peserta", x: margin + 300, align: "right" as const },
-        { label: "Hadir", x: margin + 380, align: "right" as const },
+        { label: "Peserta", x: margin + 260, align: "right" as const },
+        { label: "Hadir", x: margin + 330, align: "right" as const },
+        { label: "%", x: margin + 370, align: "right" as const },
+        { label: "Ambil", x: margin + 440, align: "right" as const },
         { label: "%", x: right, align: "right" as const },
       ];
   for (const c of recapCols) {
@@ -259,9 +284,10 @@ async function buildPdf(
     const yh = list.filter((a) => a.status === "confirmed").length;
     const ph = list.filter((a) => a.pelepasanConfirmedAt).length;
     const p = (n: number) => (list.length ? Math.round((n / list.length) * 100) : 0);
+    const ah = list.filter((a) => a.pickup).length;
     const vals = dual
-      ? [fit(label, 8, 240, f), String(list.length), String(yh), `${p(yh)}%`, String(ph), `${p(ph)}%`]
-      : [fit(label, 8, 290, f), String(list.length), String(yh), `${p(yh)}%`];
+      ? [fit(label, 8, 160, f), String(list.length), String(yh), `${p(yh)}%`, String(ph), `${p(ph)}%`, String(ah), `${p(ah)}%`]
+      : [fit(label, 8, 220, f), String(list.length), String(yh), `${p(yh)}%`, String(ah), `${p(ah)}%`];
     vals.forEach((v, i) => {
       if (i === 0) text(page, v, recapCols[0].x, y, 8, f, dark);
       else textRight(page, v, recapCols[i].x, y, 8, f, dark);
@@ -276,18 +302,20 @@ async function buildPdf(
   // ── Daftar peserta per prodi ──
   const cols = dual
     ? [
-        { label: "No", x: margin, w: 24 },
-        { label: "Nama", x: margin + 26, w: 190 },
-        { label: "NPM", x: margin + 222, w: 80 },
-        { label: "Yudisium", x: margin + 312, w: 90 },
-        { label: "Pelepasan", x: margin + 410, w: 90 },
+        { label: "No", x: margin, w: 22 },
+        { label: "Nama", x: margin + 24, w: 148 },
+        { label: "NPM", x: margin + 176, w: 68 },
+        { label: "Yudisium", x: margin + 248, w: 80 },
+        { label: "Pelepasan", x: margin + 332, w: 80 },
+        { label: "Pengambilan", x: margin + 416, w: 91 },
       ]
     : [
-        { label: "No", x: margin, w: 24 },
-        { label: "Nama", x: margin + 26, w: 220 },
-        { label: "NPM", x: margin + 252, w: 90 },
-        { label: "Status", x: margin + 352, w: 60 },
-        { label: "Waktu Hadir", x: margin + 420, w: 80 },
+        { label: "No", x: margin, w: 22 },
+        { label: "Nama", x: margin + 24, w: 180 },
+        { label: "NPM", x: margin + 208, w: 74 },
+        { label: "Status", x: margin + 286, w: 50 },
+        { label: "Waktu Hadir", x: margin + 340, w: 76 },
+        { label: "Pengambilan", x: margin + 420, w: 87 },
       ];
   const rowH = 14;
   const newPage = () => {
@@ -327,6 +355,9 @@ async function buildPdf(
         header();
       }
       no++;
+      const pickupLabel = a.pickup
+        ? [a.pickup.togaGiven ? "Toga" : null, a.pickup.undanganGiven ? "Undangan" : null].filter(Boolean).join(" + ") || "Sudah"
+        : "-";
       if (idx % 2 === 1) {
         page.drawRectangle({ x: margin - 2, y: y - 3, width: contentW + 4, height: rowH, color: rgb(0.985, 0.99, 0.987) });
       }
@@ -338,10 +369,12 @@ async function buildPdf(
         const pc = agendaCell(Boolean(a.pelepasanConfirmedAt), a.pelepasanConfirmedAt);
         text(page, yc.t, cols[3].x, y, 7.5, yc.bold ? fontBold : font, yc.color);
         text(page, pc.t, cols[4].x, y, 7.5, pc.bold ? fontBold : font, pc.color);
+        text(page, pickupLabel, cols[5].x, y, 7.5, a.pickup ? fontBold : font, a.pickup ? rgb(0.7, 0.45, 0.05) : muted);
       } else {
         const label = a.status === "confirmed" ? "Hadir" : a.status === "absent" ? "Absen" : a.status === "sent" ? "Terkirim" : "Draft";
         text(page, label, cols[3].x, y, 7.5, a.status === "confirmed" ? fontBold : font, a.status === "confirmed" ? accent : a.status === "absent" ? rgb(0.86, 0.15, 0.15) : dark);
         text(page, fmtTime(a.confirmedAt) || "-", cols[4].x, y, 7.5, font, dark);
+        text(page, pickupLabel, cols[5].x, y, 7.5, a.pickup ? fontBold : font, a.pickup ? rgb(0.7, 0.45, 0.05) : muted);
       }
       y -= rowH;
     });
@@ -368,7 +401,8 @@ export async function GET(req: NextRequest, { params }: Params) {
   const event = await getEvent(id);
   if (!event) return NextResponse.json({ message: "Acara tidak ditemukan" }, { status: 404 });
 
-  const attendees = await readAttendees(id);
+  const pickups = await getPickupMapByAttendee(id);
+  const attendees = (await readAttendees(id)).map((a) => ({ ...a, pickup: pickups.get(a.id) ?? null }));
   const format = new URL(req.url).searchParams.get("format") ?? "pdf";
   const date = new Date().toISOString().slice(0, 10);
   const safeName = event.name.replace(/[^a-z0-9]/gi, "-").slice(0, 40).toLowerCase();
