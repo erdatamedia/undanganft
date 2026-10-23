@@ -1708,3 +1708,52 @@ export async function listKonsumsi(eventId: string, includeDesk: boolean): Promi
     };
   });
 }
+
+export type BelumLengkapRow = {
+  name: string;
+  npm: string;
+  program: string | null;
+  email: string | null;
+  hasAccount: boolean;
+  fakultasStatus: string; // none | pending | rejected | desk | approved
+  fakultasReason: string | null;
+  univStatus: string;
+  univReason: string | null;
+  yudisiumStatus: string | null;
+};
+
+/** Peserta terdaftar yang pembayaran fakultas/univ-nya belum lengkap — untuk ditindaklanjuti kaprodi. */
+export async function listBelumLengkap(eventId: string, includeDesk: boolean): Promise<BelumLengkapRow[]> {
+  await ensureGraduationSchema();
+  const ok = includeDesk ? ["approved", "desk"] : ["approved"];
+  const rows = await query<Record<string, unknown>>(
+    `select a.name, a.npm, coalesce(el.program, nullif(a.program,'Belum ditentukan'), a.program) as program,
+            coalesce(nullif(m.email,''), nullif(a.email,'')) as email,
+            (gs.id is not null) as has_account,
+            coalesce(pf.status,'none') as fs, pf.reject_reason as fr,
+            coalesce(pu.status,'none') as us, pu.reject_reason as ur,
+            gs.yudisium_status
+       from attendees a
+       left join graduation_submissions gs on gs.attendee_id = a.id
+       left join mahasiswa m on m.id = gs.mahasiswa_id
+       left join mahasiswa_eligible el on el.event_id = a.event_id and el.npm = a.npm
+       left join graduation_payments pf on pf.submission_id = gs.id and pf.kind = 'fakultas'
+       left join graduation_payments pu on pu.submission_id = gs.id and pu.kind = 'univ'
+      where a.event_id = $1
+        and not (coalesce(pf.status,'none') = any($2::text[]) and coalesce(pu.status,'none') = any($2::text[]))
+      order by coalesce(el.program, a.program, '~'), a.name`,
+    [eventId, ok]
+  );
+  return rows.map((r) => ({
+    name: r.name as string,
+    npm: r.npm as string,
+    program: (r.program as string | null) ?? null,
+    email: (r.email as string | null) ?? null,
+    hasAccount: Boolean(r.has_account),
+    fakultasStatus: r.fs as string,
+    fakultasReason: (r.fr as string | null) ?? null,
+    univStatus: r.us as string,
+    univReason: (r.ur as string | null) ?? null,
+    yudisiumStatus: (r.yudisium_status as string | null) ?? null,
+  }));
+}

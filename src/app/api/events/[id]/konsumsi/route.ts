@@ -3,7 +3,7 @@ import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
 import * as XLSX from "xlsx";
 import { getUserFromSession } from "@/lib/auth";
 import { getEvent } from "@/lib/event";
-import { listKonsumsi, type KonsumsiRow } from "@/lib/graduation";
+import { listBelumLengkap, listKonsumsi, type BelumLengkapRow, type KonsumsiRow } from "@/lib/graduation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,6 +18,19 @@ const fmtDateTime = (v?: string | null) =>
 const fmtDay = (v: string) =>
   new Date(v).toLocaleDateString("id-ID", { timeZone: TZ, weekday: "short", day: "2-digit", month: "short", year: "numeric" });
 const dayKey = (v: string) => new Date(v).toLocaleDateString("en-CA", { timeZone: TZ });
+const payState = (status: string, reason: string | null, includeDesk: boolean) => {
+  if (status === "none") return "Belum upload bukti";
+  if (status === "pending") return "Menunggu verifikasi WD2";
+  if (status === "rejected") return `Ditolak${reason ? `: ${reason}` : ""}`;
+  if (status === "desk") return includeDesk ? "Diverifikasi meja" : "Diverifikasi meja (menunggu WD2)";
+  return "Disetujui";
+};
+const missing = (r: BelumLengkapRow, includeDesk: boolean) => ({
+  fak: payState(r.fakultasStatus, r.fakultasReason, includeDesk),
+  univ: payState(r.univStatus, r.univReason, includeDesk),
+  fakOk: r.fakultasStatus === "approved" || (includeDesk && r.fakultasStatus === "desk"),
+  univOk: r.univStatus === "approved" || (includeDesk && r.univStatus === "desk"),
+});
 const byLabel = (b: string | null, status: string) =>
   status === "desk" ? "Verifikasi meja" : b === "admin" ? "Admin" : b === "wd2" ? "WD2" : "-";
 
@@ -42,7 +55,7 @@ function perDay(rows: KonsumsiRow[]) {
   return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([, v]) => v);
 }
 
-function buildExcel(rows: KonsumsiRow[], eventName: string, info: string[], includeDesk: boolean): Buffer {
+function buildExcel(rows: KonsumsiRow[], belum: BelumLengkapRow[], eventName: string, info: string[], includeDesk: boolean): Buffer {
   const wb = XLSX.utils.book_new();
   const sheet = XLSX.utils.json_to_sheet(
     rows.map((r, i) => ({
@@ -64,6 +77,25 @@ function buildExcel(rows: KonsumsiRow[], eventName: string, info: string[], incl
   sheet["!cols"] = [4, 30, 16, 20, 20, 16, 20, 16, 20, 16, 11, 14, 30].map((wch) => ({ wch }));
   XLSX.utils.book_append_sheet(wb, sheet, "Daftar Konsumsi");
 
+  const belumSheet = XLSX.utils.json_to_sheet(
+    belum.map((r, i) => {
+      const m = missing(r, includeDesk);
+      return {
+        No: i + 1,
+        "Program Studi": r.program ?? "Belum ditentukan",
+        Nama: r.name,
+        NPM: r.npm,
+        Email: r.email ?? "",
+        "Akun Dashboard": r.hasAccount ? "Sudah daftar" : "Belum daftar",
+        "Bayar Fakultas": m.fak,
+        "Bayar Univ": m.univ,
+        Yudisium: r.yudisiumStatus === "hadir" ? "Hadir" : r.yudisiumStatus === "tidak_hadir" ? "Tidak hadir" : "Belum konfirmasi",
+      };
+    })
+  );
+  belumSheet["!cols"] = [4, 20, 30, 16, 28, 14, 30, 30, 16].map((wch) => ({ wch }));
+  XLSX.utils.book_append_sheet(wb, belumSheet, "Belum Lengkap");
+
   const programs = groupByProgram(rows);
   const days = perDay(rows);
   const summary = [
@@ -72,9 +104,13 @@ function buildExcel(rows: KonsumsiRow[], eventName: string, info: string[], incl
     { Keterangan: "Kriteria", Nilai: includeDesk ? "Fakultas & Univ disetujui atau diverifikasi di meja" : "Fakultas & Univ sama-sama disetujui" },
     { Keterangan: "Dicetak", Nilai: fmtDateTime(new Date().toISOString()) },
     { Keterangan: "TOTAL PORSI (peserta)", Nilai: rows.length },
+    { Keterangan: "Belum lengkap (perlu tindak lanjut)", Nilai: belum.length },
     { Keterangan: "", Nilai: "" },
     { Keterangan: "Program Studi", Nilai: "Jumlah" },
-    ...[...programs.entries()].map(([p, list]) => ({ Keterangan: p, Nilai: list.length })),
+    ...[...new Set([...programs.keys(), ...belum.map((b) => b.program || "Belum ditentukan")])].sort().map((p) => ({
+      Keterangan: p,
+      Nilai: `${programs.get(p)?.length ?? 0} lengkap / ${belum.filter((b) => (b.program || "Belum ditentukan") === p).length} belum`,
+    })),
     { Keterangan: "", Nilai: "" },
     { Keterangan: "Pembayaran lengkap per hari", Nilai: "Jumlah" },
     ...days.map((d) => ({ Keterangan: d.label, Nilai: d.n })),
@@ -87,6 +123,7 @@ function buildExcel(rows: KonsumsiRow[], eventName: string, info: string[], incl
 
 async function buildPdf(
   rows: KonsumsiRow[],
+  belum: BelumLengkapRow[],
   event: NonNullable<Awaited<ReturnType<typeof getEvent>>>,
   info: string[],
   includeDesk: boolean
@@ -106,6 +143,8 @@ async function buildPdf(
   const line = rgb(0.9, 0.91, 0.93);
   const panel = rgb(0.968, 0.98, 0.972);
   const amber = rgb(0.7, 0.45, 0.05);
+  const red = rgb(0.78, 0.13, 0.13);
+  const redPanel = rgb(0.995, 0.955, 0.955);
 
   const clean = (t: string) => (t ?? "").replace(/[^\x20-\x7E -ÿ]/g, "?");
   const width = (t: string, s: number, f = font) => f.widthOfTextAtSize(clean(t), s);
@@ -151,7 +190,7 @@ async function buildPdf(
   // Ringkasan
   const programs = groupByProgram(rows);
   const days = perDay(rows);
-  const boxH = 58;
+  const boxH = 64;
   page.drawRectangle({ x: margin, y: y - boxH, width: cw, height: boxH, color: panel, borderColor: line, borderWidth: 0.5 });
   page.drawRectangle({ x: margin, y: y - boxH, width: 3, height: boxH, color: amber });
   text("TOTAL PORSI KONSUMSI", margin + 12, y - 15, 8, bold, amber);
@@ -165,23 +204,38 @@ async function buildPdf(
     right - 10, y - 30, 7.5, font, muted
   );
   textRight(`Sudah ambil toga: ${rows.filter((r) => r.togaGiven).length}  |  undangan: ${rows.filter((r) => r.undanganGiven).length}`, right - 10, y - 43, 7.5, font, muted);
+  textRight(`BELUM LENGKAP: ${belum.length} peserta (perlu tindak lanjut)`, right - 10, y - 54, 7.5, bold, red);
   y -= boxH + 20;
 
   text("REKAP PER PROGRAM STUDI", margin, y, 8, bold, accent);
   y -= 14;
+  const belumByProgram = new Map<string, BelumLengkapRow[]>();
+  for (const b of belum) {
+    const key = b.program || "Belum ditentukan";
+    belumByProgram.set(key, [...(belumByProgram.get(key) ?? []), b]);
+  }
+  const allPrograms = [...new Set([...programs.keys(), ...belumByProgram.keys()])].sort();
   text("Program Studi", margin, y, 7.5, bold);
-  textRight("Jumlah", right, y, 7.5, bold);
+  textRight("Lengkap", margin + 330, y, 7.5, bold);
+  textRight("Belum", margin + 410, y, 7.5, bold, red);
+  textRight("Total", right, y, 7.5, bold);
   y -= 4;
   page.drawLine({ start: { x: margin, y }, end: { x: right, y }, thickness: 0.5, color: accent });
   y -= 12;
-  for (const [p, list] of programs) {
-    text(fit(p, 8, 380), margin, y, 8);
-    textRight(String(list.length), right, y, 8);
+  for (const p of allPrograms) {
+    const done = programs.get(p)?.length ?? 0;
+    const todo = belumByProgram.get(p)?.length ?? 0;
+    text(fit(p, 8, 280), margin, y, 8);
+    textRight(String(done), margin + 330, y, 8);
+    textRight(String(todo), margin + 410, y, 8, todo ? bold : font, todo ? red : dark);
+    textRight(String(done + todo), right, y, 8);
     y -= 13;
   }
   page.drawLine({ start: { x: margin, y: y + 9 }, end: { x: right, y: y + 9 }, thickness: 0.5, color: line });
   text("Total", margin, y, 8, bold);
-  textRight(String(rows.length), right, y, 8, bold);
+  textRight(String(rows.length), margin + 330, y, 8, bold);
+  textRight(String(belum.length), margin + 410, y, 8, bold, red);
+  textRight(String(rows.length + belum.length), right, y, 8, bold);
   y -= 24;
 
   if (days.length) {
@@ -245,6 +299,57 @@ async function buildPdf(
     y -= 4;
   }
 
+  // ── Belum lengkap: highlight untuk tindak lanjut kaprodi ──
+  const bcols = [
+    { label: "No", x: margin, w: 20 },
+    { label: "Nama", x: margin + 22, w: 122 },
+    { label: "NPM", x: margin + 148, w: 62 },
+    { label: "Bayar Fakultas", x: margin + 214, w: 100 },
+    { label: "Bayar Univ", x: margin + 318, w: 100 },
+    { label: "Kontak", x: margin + 422, w: 85 },
+  ];
+  const bHeader = () => {
+    for (const c of bcols) text(c.label, c.x, y, 7.5, bold);
+    y -= 4;
+    page.drawLine({ start: { x: margin, y }, end: { x: right, y }, thickness: 0.5, color: red });
+    y -= 12;
+  };
+  newPage();
+  page.drawRectangle({ x: margin - 2, y: y - 6, width: cw + 4, height: 22, color: redPanel, borderColor: red, borderWidth: 0.5 });
+  text(`BELUM LENGKAP - PERLU TINDAK LANJUT (${belum.length} peserta)`, margin + 4, y + 2, 9, bold, red);
+  y -= 22;
+  for (const l of wrap("Daftar ini untuk kaprodi menghubungi mahasiswa yang bukti bayar fakultas dan/atau univ-nya belum disetujui. Kolom status menunjukkan bagian yang masih kurang.", 8, cw, font)) {
+    text(l, margin, y, 8, font, muted);
+    y -= 11;
+  }
+  y -= 6;
+  if (belum.length === 0) {
+    text("Semua peserta sudah lengkap.", margin, y, 9, bold, accent);
+  } else {
+    bHeader();
+    let bn = 0;
+    for (const [prog, list] of belumByProgram) {
+      if (y < margin + 60) { newPage(); bHeader(); }
+      page.drawRectangle({ x: margin - 2, y: y - 4, width: cw + 4, height: 14, color: redPanel });
+      text(`${prog}  (${list.length} belum lengkap)`, margin, y, 8, bold, red);
+      y -= rowH + 2;
+      for (const b of list) {
+        if (y < margin + 24) { newPage(); bHeader(); }
+        bn++;
+        const m = missing(b, includeDesk);
+        text(String(bn), bcols[0].x, y, 7.5, font, muted);
+        text(fit(b.name, 7.5, bcols[1].w), bcols[1].x, y, 7.5, bold);
+        text(fit(b.npm, 7.5, bcols[2].w), bcols[2].x, y, 7.5);
+        const tone = (ok: boolean, st: string) => (ok ? accent : st === "none" || st === "rejected" ? red : amber);
+        text(fit(m.fak, 7, bcols[3].w), bcols[3].x, y, 7, m.fakOk ? font : bold, tone(m.fakOk, b.fakultasStatus));
+        text(fit(m.univ, 7, bcols[4].w), bcols[4].x, y, 7, m.univOk ? font : bold, tone(m.univOk, b.univStatus));
+        text(fit(b.hasAccount ? b.email ?? "-" : "Belum daftar dashboard", 7, bcols[5].w), bcols[5].x, y, 7, font, b.hasAccount ? dark : red);
+        y -= rowH;
+      }
+      y -= 4;
+    }
+  }
+
   const pages = pdf.getPages();
   pages.forEach((pg, i) => {
     const label = `Halaman ${i + 1} / ${pages.length}`;
@@ -262,7 +367,7 @@ export async function GET(req: NextRequest, { params }: Params) {
 
   const sp = new URL(req.url).searchParams;
   const includeDesk = sp.get("desk") === "1";
-  const rows = await listKonsumsi(id, includeDesk);
+  const [rows, belum] = await Promise.all([listKonsumsi(id, includeDesk), listBelumLengkap(id, includeDesk)]);
   const format = sp.get("format");
 
   const timeRange = event.timeEnd ? `${event.time} - ${event.timeEnd}` : event.time;
@@ -270,7 +375,7 @@ export async function GET(req: NextRequest, { params }: Params) {
   const date = new Date().toISOString().slice(0, 10);
 
   if (format === "excel") {
-    return new NextResponse(new Uint8Array(buildExcel(rows, event.name, info, includeDesk)), {
+    return new NextResponse(new Uint8Array(buildExcel(rows, belum, event.name, info, includeDesk)), {
       headers: {
         "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "Content-Disposition": `attachment; filename="konsumsi-${date}.xlsx"`,
@@ -278,7 +383,7 @@ export async function GET(req: NextRequest, { params }: Params) {
     });
   }
   if (format === "pdf") {
-    return new NextResponse(new Uint8Array(await buildPdf(rows, event, info, includeDesk)), {
+    return new NextResponse(new Uint8Array(await buildPdf(rows, belum, event, info, includeDesk)), {
       headers: {
         "Content-Type": "application/pdf",
         "Content-Disposition": `attachment; filename="konsumsi-${date}.pdf"`,
@@ -288,5 +393,5 @@ export async function GET(req: NextRequest, { params }: Params) {
 
   // Pratinjau jumlah untuk UI.
   const withDesk = includeDesk ? rows : await listKonsumsi(id, true);
-  return NextResponse.json({ count: rows.length, countWithDesk: withDesk.length });
+  return NextResponse.json({ count: rows.length, countWithDesk: withDesk.length, belumLengkap: belum.length });
 }

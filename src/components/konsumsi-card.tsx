@@ -6,7 +6,7 @@ import { FileText, Loader2, Utensils } from "lucide-react";
 /** Laporan untuk sie konsumsi: mahasiswa dengan dua pembayaran (fakultas & univ) terverifikasi. */
 export function KonsumsiCard({ eventId }: { eventId: string }) {
   const [includeDesk, setIncludeDesk] = useState(false);
-  const [counts, setCounts] = useState<{ count: number; countWithDesk: number } | null>(null);
+  const [counts, setCounts] = useState<{ count: number; countWithDesk: number; belumLengkap: number } | null>(null);
   const [busy, setBusy] = useState<"pdf" | "excel" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -52,12 +52,16 @@ export function KonsumsiCard({ eventId }: { eventId: string }) {
       </h3>
       <p className="text-xs text-slate-500 mb-4">
         Mahasiswa yang bukti bayar <b>fakultas dan univ</b>-nya sudah disetujui, lengkap dengan waktu persetujuan,
-        prodi, dan status yudisium, sebagai acuan jumlah porsi.
+        prodi, dan status yudisium, sebagai acuan jumlah porsi. Peserta yang belum lengkap disorot di bagian akhir PDF dan sheet &quot;Belum Lengkap&quot; untuk ditindaklanjuti kaprodi.
       </p>
       <div className="flex flex-wrap items-center gap-4 mb-4">
         <div>
           <p className="text-2xl font-bold text-[#1A1A2E]">{counts ? total : "…"}</p>
           <p className="text-xs text-slate-500">porsi (peserta)</p>
+        </div>
+        <div>
+          <p className="text-2xl font-bold text-rose-600">{counts ? counts.belumLengkap : "…"}</p>
+          <p className="text-xs text-slate-500">belum lengkap (tindak lanjut kaprodi)</p>
         </div>
         <label className="flex items-start gap-2 text-xs text-slate-600 max-w-xs">
           <input type="checkbox" className="mt-0.5" checked={includeDesk} onChange={(e) => setIncludeDesk(e.target.checked)} />
