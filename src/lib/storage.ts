@@ -34,6 +34,8 @@ export type AttendeeRecord = {
   emailSent: boolean;
   sentAt?: string | null;
   confirmedAt?: string | null;
+  /** Agenda kedua (pelepasan) pada acara dua agenda; status/confirmedAt = agenda pertama (yudisium). */
+  pelepasanConfirmedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -61,6 +63,7 @@ export type AttendeeRow = {
   whatsapp_sent: boolean;
   sent_at: string | null;
   confirmed_at: string | null;
+  pelepasan_confirmed_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -80,6 +83,7 @@ const mapRow = (row: AttendeeRow): AttendeeRecord => ({
   emailSent: row.whatsapp_sent,
   sentAt: row.sent_at,
   confirmedAt: row.confirmed_at,
+  pelepasanConfirmedAt: row.pelepasan_confirmed_at,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });
@@ -205,8 +209,9 @@ export async function updateAttendee(
          whatsapp_sent=$9,
          sent_at=$10,
          confirmed_at=$11,
+         pelepasan_confirmed_at=$12,
          updated_at=now()
-     where id=$12
+     where id=$13
      returning *`,
     [
       nextState.name,
@@ -220,6 +225,7 @@ export async function updateAttendee(
       nextState.emailSent,
       nextState.sentAt ?? null,
       nextState.confirmedAt ?? null,
+      nextState.pelepasanConfirmedAt ?? null,
       normalizedId,
     ]
   );

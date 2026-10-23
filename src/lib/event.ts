@@ -24,6 +24,7 @@ type EventRow = {
   wisuda_dresscode: string | null;
   univ_schedule: string | null;
   univ_venue: string | null;
+  dual_agenda: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -47,6 +48,7 @@ export type EventRecord = {
   wisudaDresscode?: string | null;
   univSchedule?: string | null;
   univVenue?: string | null;
+  dualAgenda?: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -68,6 +70,7 @@ export type EventPayload = {
   wisudaDresscode?: string;
   univSchedule?: string;
   univVenue?: string;
+  dualAgenda?: boolean;
 };
 
 const defaultEventPayload: EventPayload = {
@@ -106,6 +109,7 @@ async function ensureEventSchemaInternal() {
   await query(`alter table events add column if not exists wisuda_dresscode text`);
   await query(`alter table events add column if not exists univ_schedule text`);
   await query(`alter table events add column if not exists univ_venue text`);
+  await query(`alter table events add column if not exists dual_agenda boolean not null default false`);
   await query(`alter table events add column if not exists status text not null default 'ACTIVE'`);
   await query(`
     do $$ begin
@@ -140,6 +144,7 @@ async function ensureEventSchemaInternal() {
   await query(`alter table attendees add column if not exists photo_data text`);
   await query(`alter table attendees add column if not exists token text`);
   await query(`alter table attendees add column if not exists sent_at timestamptz`);
+  await query(`alter table attendees add column if not exists pelepasan_confirmed_at timestamptz`);
 
   // Generate tokens for existing attendees that don't have one
   await query(`update attendees set token = gen_random_uuid()::text where token is null`);
@@ -302,6 +307,7 @@ const mapEvent = (row: EventRow): EventRecord => ({
   wisudaDresscode: row.wisuda_dresscode,
   univSchedule: row.univ_schedule,
   univVenue: row.univ_venue,
+  dualAgenda: row.dual_agenda ?? false,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });
@@ -331,8 +337,8 @@ export async function createEvent(payload: EventPayload): Promise<EventRecord> {
   await ensureEventSchema();
   const rows = await query<EventRow>(
     `insert into events (name, description, date, time, time_end, venue, gate, banner_url, status, link_prefix,
-       yudisium_schedule, yudisium_venue, yudisium_dresscode, wisuda_dresscode, univ_schedule, univ_venue)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+       yudisium_schedule, yudisium_venue, yudisium_dresscode, wisuda_dresscode, univ_schedule, univ_venue, dual_agenda)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
      returning *`,
     [
       payload.name,
@@ -351,6 +357,7 @@ export async function createEvent(payload: EventPayload): Promise<EventRecord> {
       payload.wisudaDresscode ?? null,
       payload.univSchedule ?? null,
       payload.univVenue ?? null,
+      payload.dualAgenda ?? false,
     ]
   );
   return mapEvent(rows[0]);
@@ -369,9 +376,9 @@ export async function updateEvent(
      set name=$1, description=$2, date=$3, time=$4, time_end=$5,
          venue=$6, gate=$7, banner_url=$8, status=$9, link_prefix=$10,
          yudisium_schedule=$11, yudisium_venue=$12, yudisium_dresscode=$13, wisuda_dresscode=$14,
-         univ_schedule=$15, univ_venue=$16,
+         univ_schedule=$15, univ_venue=$16, dual_agenda=$17,
          updated_at=now()
-     where id=$17
+     where id=$18
      returning *`,
     [
       payload.name ?? current.name,
@@ -390,6 +397,7 @@ export async function updateEvent(
       payload.wisudaDresscode !== undefined ? payload.wisudaDresscode : current.wisudaDresscode,
       payload.univSchedule !== undefined ? payload.univSchedule : current.univSchedule,
       payload.univVenue !== undefined ? payload.univVenue : current.univVenue,
+      payload.dualAgenda !== undefined ? payload.dualAgenda : (current.dualAgenda ?? false),
       id,
     ]
   );

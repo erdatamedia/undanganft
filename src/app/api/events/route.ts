@@ -43,6 +43,7 @@ export async function POST(req: Request) {
     wisudaDresscode: payload.wisudaDresscode,
     univSchedule: payload.univSchedule,
     univVenue: payload.univVenue,
+    dualAgenda: payload.dualAgenda,
   });
 
   return NextResponse.json(event, { status: 201 });

@@ -14,7 +14,8 @@ type Params = { params: Promise<{ id: string }> };
 
 function buildExcel(
   attendees: Awaited<ReturnType<typeof readAttendees>>,
-  eventName: string
+  eventName: string,
+  dual = false
 ): Buffer {
   const statusLabel: Record<string, string> = {
     draft: "Belum Dikirim",
@@ -34,9 +35,17 @@ function buildExcel(
     "Waktu Kirim Undangan": a.sentAt
       ? new Date(a.sentAt).toLocaleString("id-ID")
       : "-",
-    "Waktu Konfirmasi Hadir": a.confirmedAt
+    [dual ? "Waktu Hadir Yudisium" : "Waktu Konfirmasi Hadir"]: a.confirmedAt
       ? new Date(a.confirmedAt).toLocaleString("id-ID")
       : "-",
+    ...(dual
+      ? {
+          "Hadir Pelepasan": a.pelepasanConfirmedAt ? "Hadir" : "Belum",
+          "Waktu Hadir Pelepasan": a.pelepasanConfirmedAt
+            ? new Date(a.pelepasanConfirmedAt).toLocaleString("id-ID")
+            : "-",
+        }
+      : {}),
   }));
 
   const wb = XLSX.utils.book_new();
@@ -53,6 +62,7 @@ function buildExcel(
     { wch: 14 },
     { wch: 22 },
     { wch: 22 },
+    ...(dual ? [{ wch: 16 }, { wch: 22 }] : []),
   ];
 
   XLSX.utils.book_append_sheet(wb, ws, "Kehadiran");
@@ -73,7 +83,10 @@ function buildExcel(
   const summaryRows = [
     { Keterangan: "Nama Acara", Nilai: eventName },
     { Keterangan: "Total Peserta", Nilai: total },
-    { Keterangan: "Konfirmasi Hadir", Nilai: confirmed },
+    { Keterangan: dual ? "Hadir Yudisium" : "Konfirmasi Hadir", Nilai: confirmed },
+    ...(dual
+      ? [{ Keterangan: "Hadir Pelepasan", Nilai: attendees.filter((a) => a.pelepasanConfirmedAt).length }]
+      : []),
     {
       Keterangan: "Response Rate",
       Nilai: total ? `${Math.round((confirmed / total) * 100)}%` : "0%",
@@ -151,7 +164,7 @@ async function buildPdf(
 
   const statBoxes = [
     { label: "Total Peserta", value: String(total) },
-    { label: "Konfirmasi Hadir", value: String(confirmed) },
+    { label: event.dualAgenda ? "Hadir Yudisium" : "Konfirmasi Hadir", value: String(confirmed) },
     { label: "Tidak Hadir", value: String(absent) },
     { label: "Response Rate", value: `${rate}%` },
   ];
@@ -280,9 +293,15 @@ async function buildPdf(
   y -= 10;
   page.drawLine({ start: { x: margin, y }, end: { x: PAGE_W - margin, y }, thickness: 0.5, color: lightGray });
   y -= 10;
-  page.drawText(`Total: ${total} peserta  |  Hadir: ${confirmed}  |  Response Rate: ${rate}%`, {
+  const pelepasanCount = attendees.filter((a) => a.pelepasanConfirmedAt).length;
+  page.drawText(
+    event.dualAgenda
+      ? `Total: ${total} peserta  |  Hadir Yudisium: ${confirmed}  |  Hadir Pelepasan: ${pelepasanCount}`
+      : `Total: ${total} peserta  |  Hadir: ${confirmed}  |  Response Rate: ${rate}%`,
+    {
     x: margin, y, size: 8, font: fontBold, color: muted,
-  });
+    }
+  );
 
   return pdfDoc.save();
 }
@@ -303,7 +322,7 @@ export async function GET(req: NextRequest, { params }: Params) {
   const safeName = event.name.replace(/[^a-z0-9]/gi, "-").slice(0, 40).toLowerCase();
 
   if (format === "excel" || format === "xlsx") {
-    const buf = buildExcel(attendees, event.name);
+    const buf = buildExcel(attendees, event.name, Boolean(event.dualAgenda));
     return new NextResponse(new Uint8Array(buf), {
       status: 200,
       headers: {

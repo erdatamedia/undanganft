@@ -34,6 +34,8 @@ export default function EventScanPage() {
   const [message, setMessage] = useState<string>(
     "Fokuskan kursor pada kolom di bawah lalu scan menggunakan perangkat Omni 1D/2D."
   );
+  const [dualAgenda, setDualAgenda] = useState(false);
+  const [agenda, setAgenda] = useState<"yudisium" | "pelepasan">("yudisium");
   const [lastPayload, setLastPayload] = useState<ScanPayload | null>(null);
   const [manualCode, setManualCode] = useState("");
   const [scanMode, setScanMode] = useState<"hardware" | "camera">("hardware");
@@ -41,6 +43,13 @@ export default function EventScanPage() {
   const lastSubmittedRef = useRef<string>("");
   const lastSubmitAtRef = useRef<number>(0);
   const scanBufferRef = useRef("");
+
+  useEffect(() => {
+    fetch(`/api/events/${eventId}`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((ev) => setDualAgenda(Boolean(ev?.dualAgenda)))
+      .catch(() => {});
+  }, [eventId]);
 
   const redirectToLogin = useCallback(() => {
     window.location.href = `/auth/login?redirect=/events/${eventId}/scan`;
@@ -98,7 +107,12 @@ export default function EventScanPage() {
     try {
       const res = await fetch(
         `/api/attendees/${encodeURIComponent(normalizedId)}/confirm`,
-        { method: "POST", credentials: "include" }
+        {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ agenda: dualAgenda ? agenda : "yudisium" }),
+        }
       );
       if (res.status === 401) { redirectToLogin(); return; }
       const data = await res.json();
@@ -113,12 +127,16 @@ export default function EventScanPage() {
       } catch { /* fallback */ }
       setScanned(latest);
       setStatus("success");
-      setMessage("QR sah. Status hadir diperbarui.");
+      setMessage(
+        dualAgenda
+          ? `QR sah. Kehadiran ${agenda === "pelepasan" ? "Pelepasan" : "Yudisium"} dicatat.`
+          : "QR sah. Status hadir diperbarui."
+      );
     } catch (err) {
       setStatus("error");
       setMessage((err as Error).message);
     }
-  }, [redirectToLogin]);
+  }, [redirectToLogin, dualAgenda, agenda]);
 
   const submitManualPayload = useCallback(async (value: string) => {
     if (!value.trim()) return;
@@ -316,9 +334,33 @@ export default function EventScanPage() {
               <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2">
                 <p className="uppercase tracking-[0.2em] text-slate-400">waktu scan</p>
                 <p className="text-base text-white">
-                  {new Date(scanned.confirmedAt ?? scanned.updatedAt).toLocaleString("id-ID")}
+                  {new Date(
+                    (dualAgenda && agenda === "pelepasan" ? scanned.pelepasanConfirmedAt : scanned.confirmedAt) ?? scanned.updatedAt
+                  ).toLocaleString("id-ID")}
                 </p>
               </div>
+            </div>
+          </div>
+        )}
+
+        {dualAgenda && (
+          <div className="rounded-3xl border border-slate-800 bg-slate-900/60 p-4">
+            <p className="mb-3 text-xs uppercase tracking-[0.2em] text-slate-400">Agenda yang dicatat</p>
+            <div className="grid grid-cols-2 gap-2">
+              {(["yudisium", "pelepasan"] as const).map((key) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setAgenda(key)}
+                  className={`rounded-2xl px-4 py-3 text-sm font-semibold transition-colors ${
+                    agenda === key
+                      ? "bg-emerald-400 text-slate-950"
+                      : "border border-slate-700 text-slate-300 hover:border-slate-500"
+                  }`}
+                >
+                  {key === "yudisium" ? "Yudisium" : "Pelepasan"}
+                </button>
+              ))}
             </div>
           </div>
         )}

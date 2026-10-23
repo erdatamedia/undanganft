@@ -227,6 +227,7 @@ export default function EventDetailPage() {
       {tab === "laporan" && (
         <LaporanTab
           eventId={eventId}
+          dualAgenda={Boolean(currentEvent?.dualAgenda)}
           attendees={attendees}
           onUnauthorized={handleUnauthorized}
           showToast={showToast}
@@ -360,6 +361,28 @@ function PesertaTab({
       if (res.status === 401) { onUnauthorized(); return; }
       const data = await res.json();
       if (!res.ok) throw new Error(data.message ?? "Gagal memperbarui status");
+      onAttendeeChange((prev) => prev.map((a) => (a.id === data.id ? data : a)));
+    } catch (err) {
+      showToast((err as Error).message, "err");
+    } finally {
+      setActionId(null);
+    }
+  };
+
+  const handleTogglePelepasan = async (attendee: AttendeeRecord) => {
+    setActionId(attendee.id);
+    try {
+      const res = await fetch(`/api/attendees/${attendee.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          pelepasanConfirmedAt: attendee.pelepasanConfirmedAt ? null : new Date().toISOString(),
+        }),
+      });
+      if (res.status === 401) { onUnauthorized(); return; }
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message ?? "Gagal memperbarui kehadiran pelepasan");
       onAttendeeChange((prev) => prev.map((a) => (a.id === data.id ? data : a)));
     } catch (err) {
       showToast((err as Error).message, "err");
@@ -502,8 +525,17 @@ function PesertaTab({
                   <td className="px-4 py-3">
                     <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${statusTheme[a.status].badge}`}>
                       <span className={`h-1.5 w-1.5 rounded-full ${statusTheme[a.status].dot}`} />
-                      {statusTheme[a.status].label}
+                      {currentEvent?.dualAgenda ? `Yudisium: ${statusTheme[a.status].label}` : statusTheme[a.status].label}
                     </span>
+                    {currentEvent?.dualAgenda && (
+                      <span
+                        className={`mt-1 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${
+                          a.pelepasanConfirmedAt ? "bg-sky-100 text-sky-700" : "bg-slate-100 text-slate-500"
+                        }`}
+                      >
+                        Pelepasan: {a.pelepasanConfirmedAt ? "Hadir" : "Belum"}
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-sm text-slate-500 hidden md:table-cell">{a.npm}</td>
                   <td className="px-4 py-3 text-sm text-slate-500 hidden lg:table-cell">{a.seat}</td>
@@ -523,6 +555,15 @@ function PesertaTab({
                         variant={a.status === "confirmed" ? "active" : "primary"}
                         icon={<CheckCircle2 size={13} />}
                       />
+                      {currentEvent?.dualAgenda && (
+                        <ActionBtn
+                          onClick={() => handleTogglePelepasan(a)}
+                          loading={actionId === a.id}
+                          title={a.pelepasanConfirmedAt ? "Batalkan hadir pelepasan" : "Hadir pelepasan"}
+                          variant={a.pelepasanConfirmedAt ? "active" : "outline"}
+                          icon={<GraduationCap size={13} />}
+                        />
+                      )}
                       <ActionBtn
                         onClick={() => handleMarkAbsent(a)}
                         loading={actionId === a.id}
@@ -896,6 +937,7 @@ function EventSettingsInline({
       yudisiumSchedule: event.yudisiumSchedule ?? "", yudisiumVenue: event.yudisiumVenue ?? "",
       yudisiumDresscode: event.yudisiumDresscode ?? "", wisudaDresscode: event.wisudaDresscode ?? "",
       univSchedule: event.univSchedule ?? "", univVenue: event.univVenue ?? "",
+      dualAgenda: event.dualAgenda ?? false,
     });
   }, [event]);
 
@@ -913,6 +955,7 @@ function EventSettingsInline({
           yudisiumSchedule: form.yudisiumSchedule, yudisiumVenue: form.yudisiumVenue,
           yudisiumDresscode: form.yudisiumDresscode, wisudaDresscode: form.wisudaDresscode,
           univSchedule: form.univSchedule, univVenue: form.univVenue,
+          dualAgenda: Boolean(form.dualAgenda),
         }),
       });
       if (res.status === 401) { onUnauthorized(); return; }
@@ -968,6 +1011,20 @@ function EventSettingsInline({
         <InputField label="Dresscode Yudisium" name="yudisiumDresscode" value={form.yudisiumDresscode ?? ""} onChange={sf("yudisiumDresscode")} placeholder="cth. Hitam putih, almamater" />
         <InputField label="Dresscode Wisuda Pelepasan" name="wisudaDresscode" value={form.wisudaDresscode ?? ""} onChange={sf("wisudaDresscode")} placeholder="cth. Batik dan kebaya" />
         <InputField label="Jadwal Wisuda Univ" name="univSchedule" value={form.univSchedule ?? ""} onChange={sf("univSchedule")} placeholder="cth. Minggu, 25 Oktober 2026" />
+        <label className="flex items-start gap-2 rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-700">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={Boolean(form.dualAgenda)}
+            onChange={(e) => setForm((f) => ({ ...f, dualAgenda: e.target.checked }))}
+          />
+          <span>
+            Acara dua agenda (Yudisium &amp; Pelepasan)
+            <span className="block text-xs text-slate-400">
+              Kehadiran dicatat terpisah untuk yudisium dan pelepasan; scanner punya pilihan agenda.
+            </span>
+          </span>
+        </label>
         <InputField label="Lokasi Wisuda Univ" name="univVenue" value={form.univVenue ?? ""} onChange={sf("univVenue")} placeholder="cth. Gedung Bundar UNISMA" />
       </div>
       <label className="flex flex-col gap-1 text-xs">
@@ -1117,11 +1174,13 @@ function ActionBtn({
 
 function LaporanTab({
   eventId,
+  dualAgenda,
   attendees,
   onUnauthorized,
   showToast,
 }: {
   eventId: string;
+  dualAgenda: boolean;
   attendees: AttendeeRecord[];
   onUnauthorized: () => void;
   showToast: (msg: string, type?: "ok" | "err") => void;
@@ -1134,6 +1193,8 @@ function LaporanTab({
   const absent = attendees.filter((a) => a.status === "absent").length;
   const sent = attendees.filter((a) => a.status !== "draft").length;
   const rate = total ? Math.round((confirmed / total) * 100) : 0;
+  const pelepasan = attendees.filter((a) => a.pelepasanConfirmedAt).length;
+  const ratePelepasan = total ? Math.round((pelepasan / total) * 100) : 0;
 
   const programs = new Map<string, { total: number; confirmed: number }>();
   for (const a of attendees) {
@@ -1187,9 +1248,15 @@ function LaporanTab({
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         <MiniStat label="Total Peserta" value={total} icon={<Users size={16} className="text-slate-400" />} />
         <MiniStat label="Terkirim" value={sent} icon={<Send size={16} className="text-amber-500" />} />
-        <MiniStat label="Konfirmasi Hadir" value={confirmed} icon={<CheckCircle2 size={16} className="text-emerald-600" />} />
+        <MiniStat label={dualAgenda ? "Hadir Yudisium" : "Konfirmasi Hadir"} value={confirmed} icon={<CheckCircle2 size={16} className="text-emerald-600" />} />
         <MiniStat label="Tidak Hadir" value={absent} icon={<UserX size={16} className="text-rose-500" />} />
         <MiniStat label="Response Rate" value={`${rate}%`} icon={<FileText size={16} className="text-[#40916C]" />} />
+        {dualAgenda && (
+          <>
+            <MiniStat label="Hadir Pelepasan" value={pelepasan} icon={<CheckCircle2 size={16} className="text-sky-600" />} />
+            <MiniStat label="Rate Pelepasan" value={`${ratePelepasan}%`} icon={<FileText size={16} className="text-sky-600" />} />
+          </>
+        )}
       </div>
 
       {/* Export buttons */}
