@@ -1274,6 +1274,10 @@ function editDistance(a: string, b: string): number {
   return dp[a.length][b.length];
 }
 
+/** Nama sangat mirip (salah ketik kecil): selisih huruf <= 2 (3 untuk nama panjang). */
+const nearName = (a: string, b: string) =>
+  a.length > 6 && b.length > 6 && editDistance(a, b) <= (Math.max(a.length, b.length) >= 16 ? 3 : 2);
+
 export type DuplicateGroup = { kind: "exact" | "similar"; members: DuplicateMember[] };
 
 /** Peserta dengan nama (atau NPM) sama dalam satu acara, dikelompokkan untuk digabung. */
@@ -1319,9 +1323,9 @@ export async function listDuplicateGroups(eventId: string): Promise<DuplicateGro
     const key = nameKey(m.name);
     const hit = importedOnes.find((im) => {
       const ik = nameKey(im.name);
-      const nearName = key.length > 6 && editDistance(key, ik) <= Math.max(1, Math.floor(ik.length / 12));
+      const nearNameHit = nearName(key, ik);
       const nearNpm = m.npm.length >= 8 && m.npm.length === im.npm.length && editDistance(m.npm, im.npm) <= 1 && editDistance(key, ik) <= 6;
-      return nearName || nearNpm;
+      return nearNameHit || nearNpm;
     });
     if (hit) result.push({ kind: "similar", members: [hit, m] });
   }
@@ -1353,6 +1357,7 @@ export async function mergeAttendees(
     const keep = found.rows.find((r) => r.id === keepId);
     const drop = found.rows.find((r) => r.id === removeId);
     if (!keep || !drop) throw new Error("Peserta tidak ditemukan di acara ini.");
+    const dropNpm = (drop as unknown as { npm: string }).npm;
 
     const keepSubs = await client.query<{ id: string }>("select id from graduation_submissions where attendee_id=$1", [keepId]);
     const dropSubs = await client.query<{ id: string; mahasiswa_id: string; yudisium_status: string }>(
@@ -1412,6 +1417,19 @@ export async function mergeAttendees(
        drop.email, drop.seat, drop.whatsapp_sent, drop.sent_at]
     );
     await client.query("delete from attendees where id=$1", [removeId]);
+
+    // Data hasil impor adalah sumber yang benar: bila yang dibuang adalah data impor, nama/NPM/prodinya dipakai.
+    const dropImported = await client.query<{ npm: string; name: string; program: string | null }>(
+      "select npm, name, program from mahasiswa_eligible where event_id=$1 and npm=$2",
+      [eventId, dropNpm]
+    );
+    if (dropImported.rows[0]) {
+      const imp = dropImported.rows[0];
+      await client.query(
+        "update attendees set name=$2, npm=$3, program=coalesce($4, program), updated_at=now() where id=$1",
+        [keepId, imp.name, imp.npm, imp.program]
+      );
+    }
     await client.query("commit");
   } catch (err) {
     await client.query("rollback");
@@ -1557,4 +1575,47 @@ export async function listMonitor(opts: {
         : null,
     })),
   };
+}
+
+/**
+ * Memperbaiki peserta yang NPM/prodinya tidak cocok dengan daftar impor (mis. sesudah digabung ke data pendaftar
+ * mandiri): dicocokkan lewat nama (persis atau sangat mirip) ke baris impor yang belum dipakai peserta mana pun.
+ */
+export async function repairAttendeesFromImport(
+  eventId: string
+): Promise<{ fixed: { name: string; fromNpm: string; toNpm: string; program: string | null }[]; unmatched: number }> {
+  await ensureGraduationSchema();
+  const eligible = await query<{ npm: string; name: string; program: string | null }>(
+    "select npm, name, program from mahasiswa_eligible where event_id=$1",
+    [eventId]
+  );
+  const attendees = await query<{ id: string; name: string; npm: string }>(
+    "select id, name, npm from attendees where event_id=$1",
+    [eventId]
+  );
+  const usedNpm = new Set(attendees.map((a) => a.npm));
+  const free = eligible.filter((e) => !usedNpm.has(e.npm));
+  const fixed: { name: string; fromNpm: string; toNpm: string; program: string | null }[] = [];
+  let unmatched = 0;
+
+  for (const a of attendees) {
+    if (eligible.some((e) => e.npm === a.npm)) continue; // sudah cocok dengan impor
+    const key = nameKey(a.name);
+    let candidates = free.filter((e) => nameKey(e.name) === key);
+    if (candidates.length !== 1) {
+      candidates = free.filter((e) => nearName(key, nameKey(e.name)));
+    }
+    if (candidates.length !== 1) {
+      unmatched++;
+      continue;
+    }
+    const hit = candidates[0];
+    await query(
+      `update attendees set name=$2, npm=$3, program=coalesce($4, program), updated_at=now() where id=$1`,
+      [a.id, hit.name, hit.npm, hit.program]
+    );
+    free.splice(free.indexOf(hit), 1);
+    fixed.push({ name: hit.name, fromNpm: a.npm, toNpm: hit.npm, program: hit.program });
+  }
+  return { fixed, unmatched };
 }

@@ -130,6 +130,21 @@ export default function YudisiumAdminPage() {
     await fetchData();
   };
 
+  const handleRepair = async () => {
+    if (!confirm("Samakan nama, NPM, dan prodi peserta dengan daftar impor (dicocokkan lewat nama)? Hanya peserta yang NPM-nya tidak ada di daftar impor yang diubah.")) return;
+    const res = await fetch(`/api/events/${eventId}/duplikat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ repair: true }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      showToast(`${data.fixed?.length ?? 0} peserta diperbaiki, ${data.unmatched ?? 0} tidak ada pasangan di daftar impor.`);
+    } else showToast(data.message ?? "Gagal memperbaiki.", "err");
+    await fetchData();
+  };
+
   const handleMerge = async (keep: DupMember, remove: DupMember) => {
     if (!confirm(`Gabungkan "${remove.name}" (${remove.npm}) ke "${keep.name}" (${keep.npm})? Data ${remove.name} yang lain dihapus.`)) return;
     const send = (mergeAccounts: boolean) =>
@@ -410,6 +425,23 @@ export default function YudisiumAdminPage() {
                 );
               })}
             </div>
+          </div>
+
+          {/* Sinkron dengan impor */}
+          <div className="rounded-2xl bg-white border border-slate-100 p-5 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-bold text-[#1A1A2E]">Samakan Data Peserta dengan Impor</h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Untuk peserta yang prodinya &quot;Belum ditentukan&quot; atau NPM-nya salah sesudah digabung: nama, NPM, dan prodi
+                diambil dari daftar impor Excel.
+              </p>
+            </div>
+            <button
+              onClick={handleRepair}
+              className="shrink-0 rounded-lg bg-[#1B4332] text-white text-xs font-semibold px-4 py-2 hover:bg-[#40916C]"
+            >
+              Samakan Sekarang
+            </button>
           </div>
 
           {/* Duplikasi peserta */}

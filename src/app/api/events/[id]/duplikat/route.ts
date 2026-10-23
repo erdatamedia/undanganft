@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getUserFromSession } from "@/lib/auth";
-import { autoMergeDuplicates, BothLinkedError, listDuplicateGroups, mergeAttendees } from "@/lib/graduation";
+import { autoMergeDuplicates, BothLinkedError, listDuplicateGroups, mergeAttendees, repairAttendeesFromImport } from "@/lib/graduation";
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const user = await getUserFromSession();
@@ -13,7 +13,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const user = await getUserFromSession();
   if (!user) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
   const { id } = await params;
-  const body = (await req.json().catch(() => ({}))) as { keepId?: string; removeId?: string; auto?: boolean; mergeAccounts?: boolean };
+  const body = (await req.json().catch(() => ({}))) as { keepId?: string; removeId?: string; auto?: boolean; repair?: boolean; mergeAccounts?: boolean };
+  if (body.repair) return NextResponse.json(await repairAttendeesFromImport(id));
   if (body.auto) return NextResponse.json(await autoMergeDuplicates(id));
   if (!body.keepId || !body.removeId) {
     return NextResponse.json({ message: "keepId dan removeId wajib diisi." }, { status: 400 });
