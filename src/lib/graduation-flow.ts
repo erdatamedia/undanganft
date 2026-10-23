@@ -1,6 +1,7 @@
 import {
   findActiveEvent,
   findEligible,
+  findUnlinkedAttendeeByName,
   listMahasiswaWithoutSubmission,
   getOrCreateSubmission,
   getMahasiswaById,
@@ -25,6 +26,16 @@ export async function ensureAttendeeForSubmission(
   if (imported) {
     await setSubmissionAttendee(submission.id, imported.id);
     return imported;
+  }
+
+  // NPM salah ketik / beda format: pakai peserta hasil impor bila namanya cocok persis dan hanya satu.
+  const byName = await findUnlinkedAttendeeByName(submission.eventId, mahasiswa.name);
+  if (byName) {
+    const matched = await getAttendee(byName);
+    if (matched) {
+      await setSubmissionAttendee(submission.id, matched.id);
+      return matched;
+    }
   }
 
   const eligible = await findEligible(submission.eventId, mahasiswa.npm);

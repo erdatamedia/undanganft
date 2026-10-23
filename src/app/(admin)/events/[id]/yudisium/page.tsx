@@ -11,6 +11,7 @@ type Registrant = {
   mahasiswaId: string; npm: string; name: string; program: string | null;
   yudisiumStatus: string | null; fakultasStatus: string | null; univStatus: string | null; hasAttendee: boolean;
 };
+type DupMember = { id: string; name: string; npm: string; program: string; status: string; imported: boolean; linkedSubmission: boolean };
 type Wd2Account = { id: string; email: string };
 type Doc = { kind: "yudisium" | "wisuda"; filename: string; size: number; updatedAt: string };
 
@@ -35,6 +36,7 @@ export default function YudisiumAdminPage() {
   const [registrants, setRegistrants] = useState<Registrant[]>([]);
   const [regInfo, setRegInfo] = useState<{ isRegistrationEvent: boolean; registrationEvent: { id: string; name: string } | null; unlinked: number } | null>(null);
   const [syncBusy, setSyncBusy] = useState(false);
+  const [dupGroups, setDupGroups] = useState<DupMember[][]>([]);
   const [vrows, setVrows] = useState<VRow[]>([]);
   const [docs, setDocs] = useState<Doc[]>([]);
   const [docBusy, setDocBusy] = useState<string | null>(null);
@@ -64,6 +66,8 @@ export default function YudisiumAdminPage() {
       setRegistrants(p.rows ?? []);
       setRegInfo({ isRegistrationEvent: p.isRegistrationEvent, registrationEvent: p.registrationEvent, unlinked: p.unlinked });
     }
+    const dRes = await fetch(`/api/events/${eventId}/duplikat`, { credentials: "include" });
+    if (dRes.ok) setDupGroups((await dRes.json()).groups ?? []);
     const vRes = await fetch(`/api/events/${eventId}/foto-videotron`, { credentials: "include" });
     if (vRes.ok) setVrows((await vRes.json()).rows ?? []);
     if (docsRes.ok) setDocs((await docsRes.json()).documents ?? []);
@@ -109,6 +113,20 @@ export default function YudisiumAdminPage() {
     const res = await fetch(`/api/events/${eventId}/pendaftar/${r.mahasiswaId}`, { method: "DELETE", credentials: "include" });
     if (res.ok) showToast(`Akun ${r.name} dihapus.`);
     else showToast("Gagal menghapus akun.", "err");
+    await fetchData();
+  };
+
+  const handleMerge = async (keep: DupMember, remove: DupMember) => {
+    if (!confirm(`Gabungkan "${remove.name}" (${remove.npm}) ke "${keep.name}" (${keep.npm})? Data ${remove.name} yang lain dihapus.`)) return;
+    const res = await fetch(`/api/events/${eventId}/duplikat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ keepId: keep.id, removeId: remove.id }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) showToast("Peserta digabung.");
+    else showToast(data.message ?? "Gagal menggabungkan.", "err");
     await fetchData();
   };
 
@@ -366,6 +384,47 @@ export default function YudisiumAdminPage() {
               })}
             </div>
           </div>
+
+          {/* Duplikasi peserta */}
+          {dupGroups.length > 0 && (
+            <div className="rounded-2xl bg-white border border-amber-200 p-5">
+              <h3 className="text-sm font-bold text-[#1A1A2E] mb-1">Kemungkinan Duplikat Peserta ({dupGroups.length})</h3>
+              <p className="text-xs text-slate-500 mb-4">
+                Nama atau NPM sama. Pilih data yang dipertahankan (disarankan: hasil impor); data lainnya digabung
+                ke dalamnya, termasuk tautan akun mahasiswa dan status kehadiran.
+              </p>
+              <div className="space-y-3">
+                {dupGroups.map((group) => (
+                  <div key={group.map((m) => m.id).join("|")} className="rounded-xl border border-slate-100 divide-y divide-slate-100">
+                    {group.map((m) => (
+                      <div key={m.id} className="px-3 py-2 flex items-center justify-between gap-3 text-sm">
+                        <div className="min-w-0">
+                          <p className="font-medium text-[#1A1A2E] truncate">{m.name}</p>
+                          <p className="text-xs text-slate-400">
+                            {m.npm} · {m.program} · {m.status}
+                            {m.imported ? " · hasil impor" : ""}
+                            {m.linkedSubmission ? " · terhubung akun" : ""}
+                          </p>
+                        </div>
+                        <div className="flex gap-2 shrink-0">
+                          {group.filter((o) => o.id !== m.id).map((o) => (
+                            <button
+                              key={o.id}
+                              onClick={() => handleMerge(m, o)}
+                              className="rounded-lg border border-slate-200 text-xs font-semibold px-2.5 py-1.5 hover:border-[#1B4332]"
+                              title={`Pertahankan ${m.npm}, gabungkan ${o.npm} ke sini`}
+                            >
+                              Pertahankan ini
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Pendaftar */}
           <div className="rounded-2xl bg-white border border-slate-100 p-5">

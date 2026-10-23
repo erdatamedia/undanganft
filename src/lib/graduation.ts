@@ -1248,3 +1248,114 @@ export async function deleteMahasiswaAccount(mahasiswaId: string): Promise<boole
     client.release();
   }
 }
+
+// ─── Duplikasi peserta ──────────────────────────────────────────────────────
+
+export type DuplicateMember = {
+  id: string;
+  name: string;
+  npm: string;
+  program: string;
+  status: string;
+  imported: boolean;
+  linkedSubmission: boolean;
+};
+
+const nameKey = (v: string) => v.toLowerCase().replace(/[^a-z0-9]+/g, "");
+
+/** Peserta dengan nama (atau NPM) sama dalam satu acara, dikelompokkan untuk digabung. */
+export async function listDuplicateGroups(eventId: string): Promise<DuplicateMember[][]> {
+  await ensureGraduationSchema();
+  const rows = await query<{
+    id: string; name: string; npm: string; program: string; status: string; imported: boolean; linked: boolean;
+  }>(
+    `select a.id, a.name, a.npm, a.program, a.status,
+            exists (select 1 from mahasiswa_eligible e where e.event_id=a.event_id and e.npm=a.npm) as imported,
+            exists (select 1 from graduation_submissions gs where gs.attendee_id=a.id) as linked
+       from attendees a where a.event_id=$1 order by a.name`,
+    [eventId]
+  );
+  const members: DuplicateMember[] = rows.map((r) => ({
+    id: r.id, name: r.name, npm: r.npm, program: r.program, status: r.status,
+    imported: r.imported, linkedSubmission: r.linked,
+  }));
+
+  const byName = new Map<string, DuplicateMember[]>();
+  for (const m of members) {
+    const key = nameKey(m.name);
+    if (!key) continue;
+    byName.set(key, [...(byName.get(key) ?? []), m]);
+  }
+  const groups = [...byName.values()].filter((g) => g.length > 1);
+  const seen = new Set(groups.flat().map((m) => m.id));
+
+  const byNpm = new Map<string, DuplicateMember[]>();
+  for (const m of members) {
+    if (!m.npm || m.npm === "-" || seen.has(m.id)) continue;
+    byNpm.set(m.npm, [...(byNpm.get(m.npm) ?? []), m]);
+  }
+  groups.push(...[...byNpm.values()].filter((g) => g.length > 1));
+  return groups;
+}
+
+/** Menggabungkan peserta `removeId` ke `keepId`: pengajuan dipindah, status/foto dipertahankan. */
+export async function mergeAttendees(eventId: string, keepId: string, removeId: string): Promise<void> {
+  await ensureGraduationSchema();
+  if (keepId === removeId) throw new Error("Pilih dua peserta berbeda.");
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const found = await client.query<{
+      id: string; email: string; seat: string; status: string; photo_data: string | null;
+      confirmed_at: string | null; whatsapp_sent: boolean; sent_at: string | null;
+    }>("select * from attendees where event_id=$1 and id = any($2::text[]) for update", [eventId, [keepId, removeId]]);
+    const keep = found.rows.find((r) => r.id === keepId);
+    const drop = found.rows.find((r) => r.id === removeId);
+    if (!keep || !drop) throw new Error("Peserta tidak ditemukan di acara ini.");
+
+    const keepLinks = await client.query("select 1 from graduation_submissions where attendee_id=$1", [keepId]);
+    const dropLinks = await client.query("select 1 from graduation_submissions where attendee_id=$1", [removeId]);
+    if (keepLinks.rowCount && dropLinks.rowCount) {
+      throw new Error("Keduanya sudah terhubung ke akun mahasiswa berbeda. Hapus salah satu akun mahasiswanya dulu.");
+    }
+    await client.query("update graduation_submissions set attendee_id=$1 where attendee_id=$2", [keepId, removeId]);
+
+    // Pertahankan kemajuan yang sudah terjadi pada peserta yang dibuang.
+    const rank = (st: string) => ["draft", "sent", "absent", "confirmed"].indexOf(st);
+    const takeStatus = rank(drop.status) > rank(keep.status);
+    await client.query(
+      `update attendees set
+         status = $2,
+         confirmed_at = coalesce(confirmed_at, $3),
+         photo_data = coalesce(photo_data, $4),
+         email = case when coalesce(email,'') = '' then $5 else email end,
+         seat = case when coalesce(seat,'-') = '-' then $6 else seat end,
+         whatsapp_sent = whatsapp_sent or $7,
+         sent_at = coalesce(sent_at, $8),
+         updated_at = now()
+       where id = $1`,
+      [keepId, takeStatus ? drop.status : keep.status, drop.confirmed_at, drop.photo_data,
+       drop.email, drop.seat, drop.whatsapp_sent, drop.sent_at]
+    );
+    await client.query("delete from attendees where id=$1", [removeId]);
+    await client.query("commit");
+  } catch (err) {
+    await client.query("rollback");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/** Peserta tanpa tautan ke akun mana pun dengan nama sama — dipakai hanya bila tepat satu kandidat. */
+export async function findUnlinkedAttendeeByName(eventId: string, name: string): Promise<string | null> {
+  await ensureGraduationSchema();
+  const rows = await query<{ id: string }>(
+    `select a.id from attendees a
+      where a.event_id=$1
+        and lower(regexp_replace(a.name,'[^a-zA-Z0-9]+','','g')) = $2
+        and not exists (select 1 from graduation_submissions gs where gs.attendee_id=a.id)`,
+    [eventId, nameKey(name)]
+  );
+  return rows.length === 1 ? rows[0].id : null;
+}
