@@ -1757,3 +1757,31 @@ export async function listBelumLengkap(eventId: string, includeDesk: boolean): P
     yudisiumStatus: (r.yudisium_status as string | null) ?? null,
   }));
 }
+
+export type VideotronFile = { npm: string; name: string; program: string | null; photo: string };
+
+/** Semua foto videotron yang sudah diunggah untuk acara ini, bernama sesuai nama akun mahasiswa. */
+export async function listVideotronFiles(eventId: string): Promise<VideotronFile[]> {
+  await ensureGraduationSchema();
+  const rows = await query<{ npm: string; name: string; program: string | null; photo: string }>(
+    `select m.npm, m.name, coalesce(el.program, a.program) as program, m.videotron_photo as photo
+       from mahasiswa m
+       left join mahasiswa_eligible el on el.event_id=$1 and el.npm=m.npm
+       left join graduation_submissions gs on gs.event_id=$1 and gs.mahasiswa_id=m.id
+       left join attendees a on a.id=gs.attendee_id
+      where m.videotron_photo is not null
+        and (el.npm is not null or gs.id is not null)
+      order by coalesce(el.program, a.program, '~'), m.name`,
+    [eventId]
+  );
+  return rows;
+}
+
+export async function getVideotronOwnerByNpm(npm: string): Promise<{ name: string; photo: string | null } | null> {
+  await ensureGraduationSchema();
+  const rows = await query<{ name: string; videotron_photo: string | null }>(
+    "select name, videotron_photo from mahasiswa where npm=$1",
+    [normalizeNpm(npm)]
+  );
+  return rows[0] ? { name: rows[0].name, photo: rows[0].videotron_photo } : null;
+}

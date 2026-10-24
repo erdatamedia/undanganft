@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getUserFromSession } from "@/lib/auth";
-import { updateAttendee } from "@/lib/storage";
+import { getAttendee, updateAttendee } from "@/lib/storage";
 
 export async function POST(
   req: NextRequest,
@@ -14,11 +14,23 @@ export async function POST(
   }
 
   const body = (await req.json().catch(() => ({}))) as { agenda?: string };
-  const now = new Date().toISOString();
+  const pelepasan = body.agenda === "pelepasan";
 
+  const existing = await getAttendee(id);
+  if (!existing) {
+    return NextResponse.json({ message: "QR tidak valid" }, { status: 404 });
+  }
+
+  // Scan ulang tidak menimpa waktu hadir pertama; beri tahu operator bahwa sudah tercatat.
+  const already = pelepasan ? Boolean(existing.pelepasanConfirmedAt) : existing.status === "confirmed" && Boolean(existing.confirmedAt);
+  if (already) {
+    return NextResponse.json({ ...existing, alreadyConfirmed: true });
+  }
+
+  const now = new Date().toISOString();
   // Acara dua agenda: "pelepasan" dicatat terpisah; default (yudisium) memakai status/confirmedAt.
   const updated = await updateAttendee(id, (current) =>
-    body.agenda === "pelepasan"
+    pelepasan
       ? { ...current, pelepasanConfirmedAt: now }
       : { ...current, status: "confirmed", confirmedAt: now }
   );
@@ -27,5 +39,5 @@ export async function POST(
     return NextResponse.json({ message: "QR tidak valid" }, { status: 404 });
   }
 
-  return NextResponse.json(updated);
+  return NextResponse.json({ ...updated, alreadyConfirmed: false });
 }

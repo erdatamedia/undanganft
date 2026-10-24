@@ -37,6 +37,7 @@ export default function YudisiumAdminPage() {
   const [regInfo, setRegInfo] = useState<{ isRegistrationEvent: boolean; registrationEvent: { id: string; name: string } | null; unlinked: number } | null>(null);
   const [syncBusy, setSyncBusy] = useState(false);
   const [dupGroups, setDupGroups] = useState<{ kind: "exact" | "similar"; members: DupMember[] }[]>([]);
+  const [zipFlat, setZipFlat] = useState(false);
   const [vrows, setVrows] = useState<VRow[]>([]);
   const [docs, setDocs] = useState<Doc[]>([]);
   const [docBusy, setDocBusy] = useState<string | null>(null);
@@ -551,7 +552,22 @@ export default function YudisiumAdminPage() {
             <h3 className="text-sm font-bold text-[#1A1A2E] mb-1">
               Foto Videotron ({vrows.filter((r) => r.hasPhoto).length}/{vrows.length})
             </h3>
-            <p className="text-xs text-slate-500 mb-4">Foto semi formal dari mahasiswa, dikelompokkan per prodi.</p>
+            <p className="text-xs text-slate-500 mb-3">Foto semi formal dari mahasiswa, dikelompokkan per prodi.</p>
+            <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl bg-slate-50 px-3 py-2.5">
+              <a
+                href={`/api/events/${eventId}/foto-videotron?format=zip${zipFlat ? "&flat=1" : ""}`}
+                className={`rounded-lg bg-[#1B4332] text-white text-xs font-semibold px-4 py-2 hover:bg-[#40916C] ${
+                  vrows.some((r) => r.hasPhoto) ? "" : "pointer-events-none opacity-40"
+                }`}
+              >
+                Unduh Semua Foto (ZIP)
+              </a>
+              <label className="flex items-center gap-2 text-xs text-slate-600">
+                <input type="checkbox" checked={!zipFlat} onChange={(e) => setZipFlat(!e.target.checked)} />
+                Kelompokkan folder per prodi
+              </label>
+              <span className="text-[11px] text-slate-400">Nama berkas = nama akun mahasiswa</span>
+            </div>
             {Object.entries(
               vrows.reduce<Record<string, VRow[]>>((acc, r) => {
                 (acc[r.program ?? "Tanpa prodi"] ||= []).push(r);
